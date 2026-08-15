@@ -244,7 +244,8 @@ async fn login(
     let available = modelverse::list_models(&client, &credential.endpoint, &credential.api_key)
         .await
         .context("the selected key could not list ModelVerse models")?;
-    let catalog = match control.square_models(&project.id, &available).await {
+    let available_ids = modelverse::model_ids(&available);
+    let catalog = match control.square_models(&project.id, &available_ids).await {
         Ok(catalog) => catalog,
         Err(error) => {
             eprintln!(

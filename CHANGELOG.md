@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 — 2026-08-15
+
+- Select the newest eligible Chat Completions, Responses, and Anthropic model from the authenticated `/v1/models` `created` timestamps.
+- Removed hard-coded default model preferences while retaining explicit `--model` overrides.
+
 ## 0.2.1 — 2026-08-15
 
 - Removed all `GetUFSquareModelDetail` requests and protocol-metadata dependencies.

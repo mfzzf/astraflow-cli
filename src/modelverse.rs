@@ -5,6 +5,13 @@ use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashSet;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvailableModel {
+    pub id: String,
+    pub created: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatProbe {
@@ -18,7 +25,7 @@ pub async fn list_models(
     client: &Client,
     endpoint: &str,
     api_key: &SecretString,
-) -> Result<Vec<String>> {
+) -> Result<Vec<AvailableModel>> {
     let response = client
         .get(format!("{}/v1/models", endpoint.trim_end_matches('/')))
         .bearer_auth(api_key.expose_secret())
@@ -33,16 +40,27 @@ pub async fn list_models(
     if !status.is_success() {
         bail!("ModelVerse model list failed with HTTP {status}");
     }
-    let mut models: Vec<String> = payload
+    let mut models: Vec<AvailableModel> = payload
         .get("data")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|entry| entry.get("id").and_then(Value::as_str).map(str::to_owned))
-        .filter(|id| looks_like_text_model(id))
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(Value::as_str)?.to_owned();
+            looks_like_text_model(&id).then_some(AvailableModel {
+                id,
+                created: entry.get("created").and_then(Value::as_u64).unwrap_or(0),
+            })
+        })
         .collect();
-    models.sort();
-    models.dedup();
+    models.sort_by(|left, right| {
+        right
+            .created
+            .cmp(&left.created)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let mut seen = HashSet::new();
+    models.retain(|model| seen.insert(model.id.to_ascii_lowercase()));
     if models.is_empty() {
         bail!("this ModelVerse key has no text model available");
     }
@@ -55,34 +73,36 @@ pub async fn choose_text_model(
     api_key: &SecretString,
 ) -> Result<String> {
     let models = list_models(client, endpoint, api_key).await?;
-    select_preferred(&models)
+    select_models(&models, &[])
+        .chat_completions
         .ok_or_else(|| anyhow!("this ModelVerse key has no text model available"))
 }
 
-pub fn select_models(available: &[String], catalog: &[SquareModel]) -> ModelSelection {
-    let chat_candidates: Vec<String> = available
+pub fn model_ids(available: &[AvailableModel]) -> Vec<String> {
+    available.iter().map(|model| model.id.clone()).collect()
+}
+
+pub fn select_models(available: &[AvailableModel], catalog: &[SquareModel]) -> ModelSelection {
+    let chat_candidates: Vec<&AvailableModel> = available
         .iter()
-        .filter(|model| model_labels(model, catalog).all(looks_like_coding_text_model))
-        .filter(|model| !model_labels(model, catalog).any(looks_like_anthropic_model))
-        .cloned()
+        .filter(|model| model_labels(&model.id, catalog).all(looks_like_coding_text_model))
+        .filter(|model| !model_labels(&model.id, catalog).any(looks_like_anthropic_model))
         .collect();
-    let response_candidates: Vec<String> = available
+    let response_candidates: Vec<&AvailableModel> = available
         .iter()
-        .filter(|model| model_labels(model, catalog).all(looks_like_coding_text_model))
-        .filter(|model| model_labels(model, catalog).any(looks_like_responses_model))
-        .cloned()
+        .filter(|model| model_labels(&model.id, catalog).all(looks_like_coding_text_model))
+        .filter(|model| model_labels(&model.id, catalog).any(looks_like_responses_model))
         .collect();
-    let anthropic_candidates: Vec<String> = available
+    let anthropic_candidates: Vec<&AvailableModel> = available
         .iter()
-        .filter(|model| model_labels(model, catalog).all(looks_like_coding_text_model))
-        .filter(|model| model_labels(model, catalog).any(looks_like_anthropic_model))
-        .cloned()
+        .filter(|model| model_labels(&model.id, catalog).all(looks_like_coding_text_model))
+        .filter(|model| model_labels(&model.id, catalog).any(looks_like_anthropic_model))
         .collect();
 
     ModelSelection {
-        chat_completions: select_preferred(&chat_candidates),
-        responses: select_responses(&response_candidates),
-        anthropic: select_anthropic(&anthropic_candidates),
+        chat_completions: select_latest(&chat_candidates),
+        responses: select_latest(&response_candidates),
+        anthropic: select_latest(&anthropic_candidates),
     }
 }
 
@@ -102,73 +122,16 @@ fn model_labels<'a>(model: &'a str, catalog: &'a [SquareModel]) -> impl Iterator
     }))
 }
 
-fn select_preferred(models: &[String]) -> Option<String> {
-    let preferred = ["gpt-5-mini", "gpt-4.1-mini", "deepseek-ai/DeepSeek-V3.2"];
-    for candidate in preferred {
-        if let Some(found) = models
-            .iter()
-            .find(|model| model.eq_ignore_ascii_case(candidate))
-        {
-            return Some(found.clone());
-        }
-    }
-    models.iter().min().cloned()
-}
-
-fn select_responses(models: &[String]) -> Option<String> {
-    let preferred = [
-        "gpt-5.3-codex",
-        "gpt-5.2-codex",
-        "gpt-5.1-codex-max",
-        "gpt-5.1-codex",
-        "gpt-5-codex",
-        "codex-mini-latest",
-    ];
-    for candidate in preferred {
-        if let Some(found) = models
-            .iter()
-            .find(|model| model_leaf(model).eq_ignore_ascii_case(candidate))
-        {
-            return Some(found.clone());
-        }
-    }
+fn select_latest(models: &[&AvailableModel]) -> Option<String> {
     models
         .iter()
-        .max_by(|left, right| response_rank(left).cmp(&response_rank(right)))
-        .cloned()
-}
-
-fn response_rank(model: &str) -> (u8, String) {
-    let lower = model.to_ascii_lowercase();
-    let family = if lower.contains("codex") {
-        3
-    } else if model_leaf(&lower).starts_with("gpt-") {
-        2
-    } else {
-        1
-    };
-    (family, lower)
-}
-
-fn select_anthropic(models: &[String]) -> Option<String> {
-    models
-        .iter()
-        .max_by(|left, right| anthropic_rank(left).cmp(&anthropic_rank(right)))
-        .cloned()
-}
-
-fn anthropic_rank(model: &str) -> (u8, String) {
-    let lower = normalize_model_name(model);
-    let family = if lower.contains("sonnet") {
-        3
-    } else if lower.contains("opus") {
-        2
-    } else if lower.contains("haiku") {
-        1
-    } else {
-        0
-    };
-    (family, lower)
+        .copied()
+        .max_by(|left, right| {
+            left.created
+                .cmp(&right.created)
+                .then_with(|| left.id.cmp(&right.id))
+        })
+        .map(|model| model.id.clone())
 }
 
 pub async fn minimal_chat(
@@ -313,6 +276,16 @@ fn model_leaf(id: &str) -> &str {
 mod tests {
     use super::*;
 
+    fn inventory(entries: &[(&str, u64)]) -> Vec<AvailableModel> {
+        entries
+            .iter()
+            .map(|(id, created)| AvailableModel {
+                id: (*id).to_owned(),
+                created: *created,
+            })
+            .collect()
+    }
+
     #[test]
     fn media_models_are_not_used_for_chat_probe() {
         for model in [
@@ -342,11 +315,11 @@ mod tests {
 
     #[test]
     fn local_rules_split_harness_models_without_protocol_metadata() {
-        let models = vec![
-            "chat-only".into(),
-            "gpt-4.1-mini".into(),
-            "opaque-claude-id".into(),
-        ];
+        let models = inventory(&[
+            ("chat-only", 10),
+            ("gpt-4.1-mini", 20),
+            ("opaque-claude-id", 30),
+        ]);
         let catalog = vec![SquareModel {
             id: "opaque-claude-id".into(),
             name: "Claude Sonnet 4.5".into(),
@@ -360,7 +333,7 @@ mod tests {
 
     #[test]
     fn catalog_names_can_filter_opaque_media_ids() {
-        let models = vec!["umodel-image".into(), "deepseek-ai/DeepSeek-V3.2".into()];
+        let models = inventory(&[("umodel-image", 30), ("deepseek-ai/DeepSeek-V3.2", 20)]);
         let catalog = vec![SquareModel {
             id: "umodel-image".into(),
             name: "Qwen Image Edit".into(),
@@ -375,31 +348,48 @@ mod tests {
 
     #[test]
     fn claude_models_are_anthropic_only() {
-        let models = vec![
-            "claude-haiku-4-5-20251001".into(),
-            "claude-opus-4-7".into(),
-            "claude-sonnet-4-6".into(),
-            "deepseek-ai/DeepSeek-V3.2".into(),
-        ];
+        let models = inventory(&[
+            ("claude-haiku-4-5-20251001", 10),
+            ("claude-sonnet-5", 30),
+            ("claude-opus-5", 40),
+            ("deepseek-ai/DeepSeek-V3.2", 50),
+        ]);
         let selected = select_models(&models, &[]);
         assert_eq!(
             selected.chat_completions.as_deref(),
             Some("deepseek-ai/DeepSeek-V3.2")
         );
         assert_eq!(selected.responses, None);
-        assert_eq!(selected.anthropic.as_deref(), Some("claude-sonnet-4-6"));
+        assert_eq!(selected.anthropic.as_deref(), Some("claude-opus-5"));
     }
 
     #[test]
-    fn responses_prefers_a_coding_model_from_authenticated_catalog() {
-        let models = vec![
-            "gpt-5.6-sol".into(),
-            "openai/gpt-5.1-codex-mini".into(),
-            "gpt-5.3-codex".into(),
-            "codex-mini-latest".into(),
-        ];
+    fn responses_uses_created_time_instead_of_a_hard_coded_family() {
+        let models = inventory(&[
+            ("gpt-5.6-luna", 50),
+            ("gpt-5.6-sol", 40),
+            ("gpt-5.3-codex", 30),
+            ("codex-mini-latest", 20),
+        ]);
         let selected = select_models(&models, &[]);
-        assert_eq!(selected.responses.as_deref(), Some("gpt-5.3-codex"));
+        assert_eq!(selected.responses.as_deref(), Some("gpt-5.6-luna"));
+    }
+
+    #[test]
+    fn each_protocol_selects_its_newest_eligible_model() {
+        let models = inventory(&[
+            ("gemini-3.7-flash", 400),
+            ("claude-opus-5", 300),
+            ("gpt-5.6-luna", 200),
+            ("deepseek-v4-pro", 100),
+        ]);
+        let selected = select_models(&models, &[]);
+        assert_eq!(
+            selected.chat_completions.as_deref(),
+            Some("gemini-3.7-flash")
+        );
+        assert_eq!(selected.responses.as_deref(), Some("gpt-5.6-luna"));
+        assert_eq!(selected.anthropic.as_deref(), Some("claude-opus-5"));
     }
 
     #[tokio::test]
@@ -417,10 +407,10 @@ mod tests {
             assert!(request.contains("authorization: bearer test-model-key"));
             let body = json!({
                 "data": [
-                    {"id": "deepseek-ai/DeepSeek-V3.2"},
-                    {"id": "claude-sonnet-5"},
-                    {"id": "pixverse-v6"},
-                    {"id": "text-to-sound-v2"}
+                    {"id": "deepseek-ai/DeepSeek-V3.2", "created": 100},
+                    {"id": "claude-opus-5", "created": 200},
+                    {"id": "pixverse-v6", "created": 400},
+                    {"id": "text-to-sound-v2", "created": 300}
                 ]
             })
             .to_string();
@@ -441,8 +431,14 @@ mod tests {
         assert_eq!(
             models,
             vec![
-                "claude-sonnet-5".to_owned(),
-                "deepseek-ai/DeepSeek-V3.2".to_owned()
+                AvailableModel {
+                    id: "claude-opus-5".to_owned(),
+                    created: 200
+                },
+                AvailableModel {
+                    id: "deepseek-ai/DeepSeek-V3.2".to_owned(),
+                    created: 100
+                }
             ]
         );
         server.await.unwrap();
