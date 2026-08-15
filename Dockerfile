@@ -30,6 +30,7 @@ ARG CLAUDE_VERSION=2.1.233
 ARG CODEX_VERSION=0.147.0
 ARG OPENCODE_VERSION=1.18.18
 ARG PI_VERSION=0.84.2
+ARG LEGACY_PI_VERSION=0.73.1
 ARG DSH_VERSION=0.1.0-rc.6
 ARG HERMES_COMMIT=4b0c1031dba37cd6d3dba402ab91d20b720e48ab
 RUN apt-get update \
@@ -41,6 +42,9 @@ RUN npm install --global \
     "opencode-ai@${OPENCODE_VERSION}" \
     "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     "@deepseek-ai/dsh@${DSH_VERSION}" \
+    --silent
+RUN npm install --prefix /opt/pi-legacy \
+    "@mariozechner/pi-coding-agent@${LEGACY_PI_VERSION}" \
     --silent
 RUN GROK_BIN_DIR=/usr/local/bin bash -c 'curl -fsSL https://x.ai/cli/install.sh | bash'
 RUN curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh

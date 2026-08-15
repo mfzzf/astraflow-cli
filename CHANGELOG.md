@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4 — 2026-08-15
+
+- Fixed Pi 0.73.x authentication by supporting its legacy environment-variable resolution alongside current Pi releases.
+- Added real routing/authentication coverage for both Pi 0.73.1 and Pi 0.84.2.
+
 ## 0.2.3 — 2026-08-15
 
 - Renamed both the Rust package and executable from `astraflow-cli`/`astf` to `astraflow`.

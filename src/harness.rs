@@ -33,6 +33,7 @@ const SCRUBBED_ENV: &[&str] = &[
     "HERMES_INFERENCE_PROVIDER",
     "HERMES_HOME",
     "ASTRAFLOW_MODELVERSE_API_KEY",
+    "$ASTRAFLOW_MODELVERSE_API_KEY",
     "CODEX_API_KEY",
     "DEEPSEEK_API_KEY",
     "DEEPSEEK_BASE_URL",
@@ -247,7 +248,16 @@ pub fn environment(
             values.insert("OPENAI_API_KEY".into(), key);
             values.insert("OPENAI_BASE_URL".into(), openai_base);
         }
-        Harness::Pi | Harness::PrimeAgent => {
+        Harness::Pi => {
+            // Pi <= 0.73 resolves the entire models.json apiKey string as an
+            // environment-variable name, while newer Pi expands the leading
+            // `$`. Supplying both names keeps the key out of the config file
+            // and supports both resolution rules.
+            values.insert("$ASTRAFLOW_MODELVERSE_API_KEY".into(), key.clone());
+            values.insert("OPENAI_API_KEY".into(), key);
+            values.insert("OPENAI_BASE_URL".into(), openai_base);
+        }
+        Harness::PrimeAgent => {
             values.insert("OPENAI_API_KEY".into(), key);
             values.insert("OPENAI_BASE_URL".into(), openai_base);
         }
@@ -668,6 +678,14 @@ mod tests {
             config["provider"]["astraflow"]["models"]["chat-model"]["name"],
             "chat-model"
         );
+    }
+
+    #[test]
+    fn pi_supports_legacy_and_current_environment_resolution() {
+        let cred = credential();
+        let env = environment(Harness::Pi, &cred.api_key, &cred.endpoint, "chat-model");
+        assert_eq!(env.values["ASTRAFLOW_MODELVERSE_API_KEY"], "test-key");
+        assert_eq!(env.values["$ASTRAFLOW_MODELVERSE_API_KEY"], "test-key");
     }
 
     #[test]

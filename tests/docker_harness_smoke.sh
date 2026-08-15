@@ -37,8 +37,12 @@ run_case() {
   local name=$1
   shift
   local before
+  local binary_args=()
+  if [ -n "${HARNESS_BINARY:-}" ]; then
+    binary_args=(--binary "$HARNESS_BINARY")
+  fi
   before=$(wc -l < "$mock_log")
-  if ! timeout 90 astraflow "$name" --model astraflow-test-model -- "$@" >/tmp/"$name".out 2>/tmp/"$name".err; then
+  if ! timeout 90 astraflow "$name" "${binary_args[@]}" --model astraflow-test-model -- "$@" >/tmp/"$name".out 2>/tmp/"$name".err; then
     printf '%s failed\n' "$name" >&2
     sed -n '1,200p' /tmp/"$name".err >&2
     sed -n '1,80p' /tmp/"$name".out >&2
@@ -74,6 +78,8 @@ run_case grok --single 'Reply with exactly ASTRAFLOW_OK'
 run_case opencode run 'Reply with exactly ASTRAFLOW_OK' --format json
 run_case hermes --oneshot 'Reply with exactly ASTRAFLOW_OK'
 run_case pi --print 'Reply with exactly ASTRAFLOW_OK'
+HARNESS_BINARY=/opt/pi-legacy/node_modules/.bin/pi run_case pi --print 'Reply with exactly ASTRAFLOW_OK'
+unset HARNESS_BINARY
 run_case dsh --profile headless 'Reply with exactly ASTRAFLOW_OK'
 run_case prime-agent --print 'Reply with exactly ASTRAFLOW_OK'
 

@@ -32,7 +32,7 @@ By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTRAFLOW_VERSION=0.2.3 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
+  ASTRAFLOW_VERSION=0.2.4 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -161,7 +161,7 @@ docker build --target harness-all -t astraflow-harness-all .
 docker run --rm astraflow-harness-all
 ```
 
-Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.3`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
+Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks—including both legacy and current Pi authentication behavior—on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.4`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
 
 ## 中文说明
 
