@@ -400,7 +400,11 @@ pub fn environment_with_models(
     }
     Environment {
         values,
-        removed: SCRUBBED_ENV.iter().map(|name| (*name).to_owned()).collect(),
+        removed: SCRUBBED_ENV
+            .iter()
+            .filter(|name| !(harness == Harness::Dsh && **name == "DSH_HOME"))
+            .map(|name| (*name).to_owned())
+            .collect(),
     }
 }
 
@@ -723,16 +727,15 @@ fn prepare_configuration(
             artifact_dirs.push(dir);
         }
         Harness::Dsh => {
-            let dir = tempfile::tempdir().context("create temporary DSH home")?;
-            fs::write(dir.path().join("settings.yaml"), b"{}\n")
-                .context("write isolated DSH settings")?;
-            fs::write(dir.path().join("cordis.patch.yml"), b"[]\n")
-                .context("write isolated DSH home patch")?;
-            overlay
-                .values
-                .insert("DSH_HOME".into(), dir.path().to_string_lossy().into_owned());
-            artifacts.push(dsh_patch(endpoint, model, &models.slots)?);
-            artifact_dirs.push(dir);
+            let settings_dir = crate::config::global_dir()?.join("dsh");
+            fs::create_dir_all(&settings_dir)
+                .context("create AstraFlow-managed DSH settings directory")?;
+            artifacts.push(dsh_patch(
+                endpoint,
+                model,
+                &models.slots,
+                &settings_dir.join("settings.yaml"),
+            )?);
         }
         Harness::Hermes => {
             let dir = tempfile::tempdir().context("create temporary Hermes home")?;
@@ -1127,6 +1130,7 @@ fn dsh_patch(
     endpoint: &str,
     model: &str,
     models: &BTreeMap<String, String>,
+    settings_path: &Path,
 ) -> Result<NamedTempFile> {
     let mut file = NamedTempFile::new()?;
     let catalog = unique_models(model, models)
@@ -1135,7 +1139,8 @@ fn dsh_patch(
         .collect::<Vec<_>>()
         .join("\n");
     let payload = format!(
-        "- id: settings\n  disabled: true\n\n- id: agent-default-model\n  config:\n    provider: astraflow\n    model: {}\n\n- id: session-title-llm\n  config:\n    targetWords: 5\n    targetCjkCharacters: 10\n    maxInputBytes: 4096\n    maxOutputTokens: 64\n    timeoutMs: 60000\n    provider: astraflow\n    model: {}\n\n- id: compaction-basic\n  config:\n    summarizationProvider: astraflow\n    summarizationModel: {}\n\n- id: tool-subagent\n  config:\n    provider: spawn\n    toolName: subagent\n    backgroundMode: continuable\n    agentOptions:\n      provider: astraflow\n      model: {}\n\n- id: tool-subagent-fork\n  config:\n    provider: fork\n    toolName: subagent_fork\n    backgroundMode: one-shot\n    agentOptions:\n      provider: astraflow\n      model: {}\n\n- id: llm-pi-ai\n  config:\n    providers:\n      astraflow:\n        displayName: AstraFlow ModelVerse\n        apiKeyEnv: ASTRAFLOW_MODELVERSE_API_KEY\n        api: openai-completions\n        baseURL: {}\n        models:\n{}\n",
+        "- id: settings\n  config:\n    path: {}\n\n- id: agent-default-model\n  config:\n    provider: astraflow\n    model: {}\n\n- id: session-title-llm\n  config:\n    targetWords: 5\n    targetCjkCharacters: 10\n    maxInputBytes: 4096\n    maxOutputTokens: 64\n    timeoutMs: 60000\n    provider: astraflow\n    model: {}\n\n- id: compaction-basic\n  config:\n    summarizationProvider: astraflow\n    summarizationModel: {}\n\n- id: tool-subagent\n  config:\n    provider: spawn\n    toolName: subagent\n    backgroundMode: continuable\n    agentOptions:\n      provider: astraflow\n      model: {}\n\n- id: tool-subagent-fork\n  config:\n    provider: fork\n    toolName: subagent_fork\n    backgroundMode: one-shot\n    agentOptions:\n      provider: astraflow\n      model: {}\n\n- id: llm-pi-ai\n  config:\n    providers:\n      astraflow:\n        displayName: AstraFlow ModelVerse\n        apiKeyEnv: ASTRAFLOW_MODELVERSE_API_KEY\n        api: openai-completions\n        baseURL: {}\n        models:\n{}\n",
+        yaml_string(&settings_path.to_string_lossy()),
         yaml_string(model),
         yaml_string(model_for_slot(models, "title", model)),
         yaml_string(model_for_slot(models, "compaction", model)),
@@ -1557,16 +1562,24 @@ mod tests {
     }
 
     #[test]
-    fn dsh_uses_managed_profiles_and_rejects_user_layers() {
+    fn dsh_preserves_home_enables_settings_and_rejects_route_overrides() {
         let models = BTreeMap::from([
             ("title".into(), "title-slot".into()),
             ("compaction".into(), "compact-slot".into()),
             ("spawn".into(), "spawn-slot".into()),
             ("fork".into(), "fork-slot".into()),
         ]);
-        let patch = dsh_patch("https://api.modelverse.cn", "chat-model", &models).unwrap();
+        let patch = dsh_patch(
+            "https://api.modelverse.cn",
+            "chat-model",
+            &models,
+            Path::new("/tmp/astraflow/dsh/settings.yaml"),
+        )
+        .unwrap();
         let content = fs::read_to_string(patch.path()).unwrap();
-        assert!(content.contains("- id: settings\n  disabled: true"));
+        assert!(content.contains("- id: settings\n  config:\n    path:"));
+        assert!(!content.contains("disabled: true"));
+        assert!(content.contains("/tmp/astraflow/dsh/settings.yaml"));
         assert!(content.contains("model: \"title-slot\""));
         assert!(content.contains("summarizationModel: \"compact-slot\""));
         assert!(content.contains("model: \"spawn-slot\""));
@@ -1616,6 +1629,8 @@ mod tests {
         );
         assert!(!env.values.contains_key("DEEPSEEK_API_KEY"));
         assert!(!env.values.contains_key("OPENAI_API_KEY"));
+        assert!(!env.values.contains_key("DSH_HOME"));
+        assert!(!env.removed.iter().any(|name| name == "DSH_HOME"));
     }
 
     #[test]

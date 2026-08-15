@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 — 2026-08-16
+
+- Restored DeepSeek Harness settings, plugins, profiles, sessions, and Web onboarding persistence; the enabled settings service now uses a persistent AstraFlow-scoped document so existing DSH provider settings cannot override the final managed routing patch.
+- Expanded the real DSH Web smoke test from process startup to an HTTP-served browser UI check under hostile user routing configuration.
+
 ## 0.3.1 — 2026-08-16
 
 - Split text pricing into Input, Cache Read, Cache Create, and Output starting-price columns, with distinct 5-minute and 1-hour cache creation rates.

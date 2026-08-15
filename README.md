@@ -164,7 +164,7 @@ astraflow dsh --model deepseek-v4-flash-0731 -- "run the tests"
 astraflow dsh --model deepseek-v4-flash-0731 --profile web
 ```
 
-Wrapped launches isolate every harness from conflicting local state. Codex and Grok receive temporary homes; Claude ignores user/project/local settings; OpenCode disables project configuration, default plugins, external skills, and Claude compatibility imports; Hermes uses a temporary safe-mode profile and empty managed scope; Pi and Prime use temporary agent configuration while retaining their normal session directories; DSH uses an isolated home and managed profile patch. API keys are passed through process environment only and are never written into those temporary harness files.
+Wrapped launches protect endpoint, key, provider, and model routing from conflicting local state. Codex and Grok receive temporary homes; Claude ignores user/project/local settings; OpenCode disables project configuration, default plugins, external skills, and Claude compatibility imports; Hermes uses a temporary safe-mode profile and empty managed scope; Pi and Prime use temporary agent configuration while retaining their normal session directories. DSH keeps the user's normal `DSH_HOME`, plugins, profiles, and sessions, while its enabled settings service uses a persistent AstraFlow-scoped document so Web preferences and onboarding acknowledgement survive restarts without an existing DSH model/provider setting overriding AstraFlow routing. AstraFlow appends a final managed patch that pins its provider, endpoint, key, and selected models. API keys are passed through process environment only and are never written into temporary harness files.
 
 Organization-managed Claude, Codex, or Grok policy remains authoritative by design. If an administrator requires a conflicting provider, the wrapped launch fails instead of bypassing that policy.
 
@@ -246,7 +246,7 @@ Pushes to `main` run formatting, tests, Clippy, and hostile-config routing check
 
 交互式启动时每天最多检查一次 GitHub Release。发现新版本会显示 Update now、Remind me later、Skip this version 三个选项；跳过仅针对当前版本，下一个版本仍会提示。可通过 `ASTRAFLOW_NO_UPDATE_CHECK=1` 关闭自动检查，也可以随时运行 `astraflow update` 主动更新。
 
-启动 harness 时，`astraflow` 会隔离用户、项目和本地配置，并显式固定 endpoint、key、provider 和 model。`--` 后仍可传递普通参数，但会拒绝能够覆盖路由的内部 model/provider/config/profile/patch/plugin/extension 参数；请使用外层 `astraflow <harness> --model ...` 选择模型。DSH 例外允许由 AstraFlow 管理的 `--profile web` 和 `--profile headless`，但仍禁止自定义 profile 与 patch 覆盖。
+启动 harness 时，`astraflow` 会保护 endpoint、key、provider 和 model 路由不被冲突配置覆盖。`--` 后仍可传递普通参数，但会拒绝能够覆盖路由的内部 model/provider/config/profile/patch/plugin/extension 参数；请使用外层 `astraflow <harness> --model ...` 选择模型。DSH 会保留用户原有的 `DSH_HOME`、插件、profile 和会话；settings 服务保持启用，并改用 AstraFlow 专属的持久化设置文档，使 Web 偏好和内测声明确认可跨重启保存，同时避免旧的 DSH provider/model 设置覆盖 AstraFlow 路由。最后一层受管 patch 只固定 AstraFlow provider、endpoint、key 和所选模型；`--profile web` 与 `--profile headless` 均可正常使用。
 
 Linux / macOS 一键安装：
 

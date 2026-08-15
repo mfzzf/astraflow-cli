@@ -150,19 +150,43 @@ unset HARNESS_BINARY
 run_case dsh 'Reply with exactly ASTRAFLOW_OK'
 run_case prime-agent --print 'Reply with exactly ASTRAFLOW_OK'
 
-set +e
-timeout 10 astraflow dsh --model astraflow-test-model --profile web \
-  >/tmp/dsh-web.out 2>/tmp/dsh-web.err
-dsh_web_status=$?
-set -e
-if [ "$dsh_web_status" -ne 124 ]; then
-  printf 'dsh web exited before the test timeout (status %s)\n' "$dsh_web_status" >&2
+astraflow dsh --model astraflow-test-model --profile web \
+  >/tmp/dsh-web.out 2>/tmp/dsh-web.err &
+dsh_web_pid=$!
+dsh_web_url=
+for _ in $(seq 1 100); do
+  dsh_web_url=$(sed -n 's/^dsh web: \(http:\/\/127\.0\.0\.1:[0-9][0-9]*\).*$/\1/p' /tmp/dsh-web.out | tail -n 1)
+  if [ -n "$dsh_web_url" ] && curl -fsS "$dsh_web_url" >/tmp/dsh-web.html; then
+    break
+  fi
+  if ! kill -0 "$dsh_web_pid" 2>/dev/null; then
+    printf 'dsh web exited before serving the UI\n' >&2
+    sed -n '1,120p' /tmp/dsh-web.out >&2
+    sed -n '1,120p' /tmp/dsh-web.err >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+if [ -z "$dsh_web_url" ] || [ ! -s /tmp/dsh-web.html ]; then
+  printf 'dsh web did not serve its browser UI in time\n' >&2
   sed -n '1,120p' /tmp/dsh-web.out >&2
   sed -n '1,120p' /tmp/dsh-web.err >&2
   exit 1
 fi
-grep -Fq 'dsh web: http://127.0.0.1:' /tmp/dsh-web.out
-echo 'dsh: managed web profile startup verified'
+curl -fsS \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"client-request","rpcId":"00000000-0000-4000-8000-000000000001","method":"settings.mutate","payload":{"ns":"ui-onboarding","ops":[{"op":"set","path":["welcomeNoticeVersion"],"value":"astraflow-smoke"}]}}' \
+  "$dsh_web_url/api/settings.mutate" >/tmp/dsh-settings-mutate.json
+python3 - <<'PY'
+import json
+
+response = json.load(open("/tmp/dsh-settings-mutate.json", encoding="utf-8"))
+assert response["result"]["ok"] is True, response
+PY
+grep -Fq 'welcomeNoticeVersion: astraflow-smoke' /tmp/astraflow-home/dsh/settings.yaml
+kill "$dsh_web_pid" 2>/dev/null || true
+wait "$dsh_web_pid" 2>/dev/null || true
+echo 'dsh: web UI served and onboarding acknowledgement persisted with managed routing applied'
 
 for executable in claude codex grok opencode hermes pi dsh prime-agent; do
   command -v "$executable" >/dev/null
