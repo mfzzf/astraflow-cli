@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use astraflow_cli::cli::{
     Cli, Command as CliCommand, CompletionShell, HarnessCommand, HarnessLaunchArgs, Language,
+    ModelVerseRegion,
 };
 use astraflow_cli::config::{self, Credential, OAuthProvider, ResolvedCredential};
 use astraflow_cli::harness::{self, Harness};
@@ -136,6 +137,7 @@ async fn login(
         println!("{BANNER}");
     }
     let path = config::credential_path(args.local, cwd)?;
+    let region = select_region(args.region, mode)?;
 
     if let Some(input) = args.with_key {
         let raw = if input == "-" {
@@ -150,10 +152,17 @@ async fn login(
         }
         let mut credential = config::imported(raw);
         credential.project_id = args.project_id;
-        let model =
-            modelverse::choose_text_model(&client, &credential.endpoint, &credential.api_key)
-                .await
-                .context("the imported key could not be validated")?;
+        credential.region = region;
+        credential.endpoint = modelverse_endpoint(region);
+        let available = modelverse::list_models(&client, &credential.endpoint, &credential.api_key)
+            .await
+            .context("the imported key could not be validated")?;
+        credential.models = modelverse::select_models(&available, &[]);
+        let model = credential
+            .models
+            .chat_completions
+            .clone()
+            .ok_or_else(|| anyhow!("the imported key has no Chat Completions model"))?;
         config::save_credential(&path, &credential)?;
         return mode.print(
             format!("{} Validated with {model}.", messages.ready()),
@@ -219,12 +228,25 @@ async fn login(
         key_id: Some(selected.id.clone()),
         key_name: Some(selected.name.clone()),
         project_id: Some(project.id.clone()),
-        endpoint: env::var("ASTRAFLOW_MODELVERSE_ENDPOINT")
-            .unwrap_or_else(|_| "https://api.modelverse.cn".into())
-            .trim_end_matches('/')
-            .to_owned(),
+        endpoint: modelverse_endpoint(region),
+        region,
+        models: Default::default(),
         oauth: Some(tokens.clone()),
     };
+    let available = modelverse::list_models(&client, &credential.endpoint, &credential.api_key)
+        .await
+        .context("the selected key could not list ModelVerse models")?;
+    let catalog = match control.square_models(&project.id, &available).await {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            eprintln!(
+                "warning: ModelVerse catalog unavailable; using model-name protocol fallback: {error}"
+            );
+            Vec::new()
+        }
+    };
+    let mut credential = credential;
+    credential.models = modelverse::select_models(&available, &catalog);
     config::save_credential(&path, &credential)?;
     mode.print(
         format!(
@@ -239,9 +261,41 @@ async fn login(
             "project": {"id": project.id, "name": project.name},
             "api_key": {"id": selected.id, "name": selected.name},
             "email": tokens.email,
+            "region": credential.region,
+            "endpoint": credential.endpoint,
+            "models": credential.models,
             "path": path
         }),
     )
+}
+
+fn select_region(
+    requested: Option<ModelVerseRegion>,
+    mode: OutputMode,
+) -> Result<ModelVerseRegion> {
+    if let Some(region) = requested {
+        return Ok(region);
+    }
+    if mode == OutputMode::Json || !io::stdin().is_terminal() {
+        return Ok(ModelVerseRegion::China);
+    }
+    let labels: Vec<_> = ModelVerseRegion::ALL
+        .iter()
+        .map(|region| region.label())
+        .collect();
+    let selected = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("ModelVerse region / 地域")
+        .items(&labels)
+        .default(0)
+        .interact()?;
+    Ok(ModelVerseRegion::ALL[selected])
+}
+
+fn modelverse_endpoint(region: ModelVerseRegion) -> String {
+    env::var("ASTRAFLOW_MODELVERSE_ENDPOINT")
+        .unwrap_or_else(|_| region.endpoint().to_owned())
+        .trim_end_matches('/')
+        .to_owned()
 }
 
 fn select_api_key<'a>(
@@ -286,7 +340,9 @@ fn auth(mode: OutputMode, cwd: &Path) -> Result<i32> {
                     "project_id": credential.project_id,
                     "key_id": credential.key_id,
                     "key_name": credential.key_name,
-                    "endpoint": credential.endpoint
+                    "endpoint": credential.endpoint,
+                    "region": credential.region,
+                    "models": credential.models
                 }),
             )?;
             Ok(0)
@@ -303,7 +359,14 @@ fn auth(mode: OutputMode, cwd: &Path) -> Result<i32> {
 
 async fn launch(harness: Harness, args: HarnessLaunchArgs, cwd: &Path) -> Result<i32> {
     let credential = require_credential(cwd)?;
-    let status = harness::launch(harness, &credential, args.binary.as_deref(), &args.args).await?;
+    let status = harness::launch(
+        harness,
+        &credential,
+        args.binary.as_deref(),
+        &args.args,
+        args.model.as_deref(),
+    )
+    .await?;
     Ok(status.code().unwrap_or(1))
 }
 
@@ -407,14 +470,19 @@ async fn vault_tunnel(
             .unwrap_or("prime-agent"),
     )
     .unwrap_or(Harness::PrimeAgent);
-    let overlay = harness::environment(
+    let tunnel_credential = Credential {
+        api_key: tunnel.token.clone(),
+        endpoint: format!("http://{}", tunnel.address),
+        ..credential
+    };
+    let status = harness::launch(
         harness,
-        &tunnel.token,
-        &format!("http://{}", tunnel.address),
-    );
-    let command_args =
-        harness::command_arguments(harness, &format!("http://{}", tunnel.address), &exec[1..]);
-    let status = harness::run_with_environment(&executable, &command_args, &overlay).await?;
+        &tunnel_credential,
+        Some(&executable),
+        &exec[1..],
+        None,
+    )
+    .await?;
     tunnel.stop().await?;
     Ok(status.code().unwrap_or(1))
 }
@@ -473,45 +541,85 @@ async fn harness_test(
     model: Option<String>,
     verify_usage: bool,
 ) -> Result<i32> {
-    let executable = env::current_exe()?;
-    let overlay = harness::environment(harness_name, &credential.api_key, &credential.endpoint);
-    let mut command = Command::new(executable);
-    command.arg("_probe").arg("--json");
-    if live {
-        command.arg("--live");
-    }
-    if let Some(model) = model {
-        command.arg("--model").arg(model);
-    }
-    for key in &overlay.removed {
-        command.env_remove(key);
-    }
-    command.envs(&overlay.values);
-    command.stdout(Stdio::piped()).stderr(Stdio::inherit());
-    let output = command.output().await?;
+    let selected_model = harness::selected_model(harness_name, &credential, model.as_deref())?;
+    let args = if live {
+        harness_live_arguments(harness_name)
+    } else {
+        vec!["--version".to_owned()]
+    };
+    let output = harness::launch_capture(
+        harness_name,
+        &credential,
+        None,
+        &args,
+        Some(&selected_model),
+    )
+    .await?;
     if !output.status.success() {
-        bail!("injected child probe exited with {}", output.status);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "{} exited with {}: {}",
+            harness_name.executable(),
+            output.status,
+            stderr.trim()
+        );
     }
-    let probe: Value = serde_json::from_slice(&output.stdout)
-        .context("injected child probe did not return JSON")?;
     let usage_detail = if verify_usage {
+        let probe = modelverse::minimal_chat(
+            &http_client()?,
+            &credential.endpoint,
+            &credential.api_key,
+            &selected_model,
+        )
+        .await?;
         let request_id = probe
-            .pointer("/probe/request_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("the live response did not expose a request ID"))?;
-        Some(verify_usage_detail(&credential, request_id).await?)
+            .request_id
+            .ok_or_else(|| anyhow!("the usage verification probe exposed no request ID"))?;
+        Some(verify_usage_detail(&credential, &request_id).await?)
     } else {
         None
     };
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     mode.print(
         if live {
-            "Child-process injection and live ModelVerse message succeeded."
+            "The real harness sent a live ModelVerse message successfully."
         } else {
-            "Child-process environment injection succeeded."
+            "The real installed harness loaded with AstraFlow configuration."
         },
-        &json!({"ok": true, "harness": harness_name, "probe": probe.get("probe"), "usage_detail": usage_detail}),
+        &json!({
+            "ok": true,
+            "harness": harness_name,
+            "model": selected_model,
+            "live": live,
+            "stdout": stdout,
+            "usage_detail": usage_detail
+        }),
     )?;
     Ok(0)
+}
+
+fn harness_live_arguments(harness: Harness) -> Vec<String> {
+    let prompt = "Reply with exactly: ASTRAFLOW_OK".to_owned();
+    match harness {
+        Harness::Claude => vec![
+            "--print".into(),
+            prompt,
+            "--output-format".into(),
+            "json".into(),
+        ],
+        Harness::Codex => vec![
+            "exec".into(),
+            "--skip-git-repo-check".into(),
+            "--sandbox".into(),
+            "read-only".into(),
+            prompt,
+        ],
+        Harness::Grok => vec!["--single".into(), prompt],
+        Harness::Opencode => vec!["run".into(), prompt, "--format".into(), "json".into()],
+        Harness::Hermes => vec!["--oneshot".into(), prompt],
+        Harness::Pi | Harness::PrimeAgent => vec!["--print".into(), prompt],
+        Harness::Dsh => vec!["--profile".into(), "headless".into(), prompt],
+    }
 }
 
 async fn verify_usage_detail(
@@ -616,10 +724,12 @@ async fn eval(mode: OutputMode, cwd: &Path, args: astraflow_cli::cli::EvalArgs) 
     let mut command = Command::new(bun);
     command.arg("test").args(&files);
     if let Some(credential) = credential {
+        let selected_model = harness::selected_model(Harness::PrimeAgent, &credential, None)?;
         let overlay = harness::environment(
             Harness::PrimeAgent,
             &credential.api_key,
             &credential.endpoint,
+            &selected_model,
         );
         for key in overlay.removed {
             command.env_remove(key);

@@ -1,4 +1,4 @@
-use crate::cli::Language;
+use crate::cli::{Language, ModelVerseRegion};
 use anyhow::{Context, Result, anyhow, bail};
 use directories::ProjectDirs;
 use secrecy::{ExposeSecret, SecretString};
@@ -19,7 +19,19 @@ pub struct Credential {
     pub key_name: Option<String>,
     pub project_id: Option<String>,
     pub endpoint: String,
+    pub region: ModelVerseRegion,
+    pub models: ModelSelection,
     pub oauth: Option<OAuthTokens>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelSelection {
+    #[serde(default)]
+    pub chat_completions: Option<String>,
+    #[serde(default)]
+    pub responses: Option<String>,
+    #[serde(default)]
+    pub anthropic: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +94,10 @@ struct StoredCredential {
     project_id: Option<String>,
     #[serde(default = "default_endpoint")]
     endpoint: String,
+    #[serde(default = "default_region")]
+    region: ModelVerseRegion,
+    #[serde(default)]
+    models: ModelSelection,
     #[serde(default)]
     oauth: Option<StoredOAuthTokens>,
 }
@@ -111,6 +127,10 @@ fn default_endpoint() -> String {
         .unwrap_or_else(|_| "https://api.modelverse.cn".to_owned())
         .trim_end_matches('/')
         .to_owned()
+}
+
+fn default_region() -> ModelVerseRegion {
+    ModelVerseRegion::China
 }
 
 fn default_token_type() -> String {
@@ -159,21 +179,21 @@ pub fn credential_path(local: bool, cwd: &Path) -> Result<PathBuf> {
 }
 
 pub fn resolve(cwd: &Path) -> Result<Option<ResolvedCredential>> {
-    if let Ok(value) = env::var("ASTRAFLOW_API_KEY") {
-        if !value.trim().is_empty() {
-            return Ok(Some(ResolvedCredential {
-                credential: imported(value),
-                source: CredentialSource::AstraFlowEnvironment,
-            }));
-        }
+    if let Ok(value) = env::var("ASTRAFLOW_API_KEY")
+        && !value.trim().is_empty()
+    {
+        return Ok(Some(ResolvedCredential {
+            credential: imported(value),
+            source: CredentialSource::AstraFlowEnvironment,
+        }));
     }
-    if let Ok(value) = env::var("MODELVERSE_API_KEY") {
-        if !value.trim().is_empty() {
-            return Ok(Some(ResolvedCredential {
-                credential: imported(value),
-                source: CredentialSource::ModelVerseEnvironment,
-            }));
-        }
+    if let Ok(value) = env::var("MODELVERSE_API_KEY")
+        && !value.trim().is_empty()
+    {
+        return Ok(Some(ResolvedCredential {
+            credential: imported(value),
+            source: CredentialSource::ModelVerseEnvironment,
+        }));
     }
     if let Some(path) = find_workspace_credentials(cwd) {
         return Ok(Some(ResolvedCredential {
@@ -198,6 +218,8 @@ pub fn imported(value: String) -> Credential {
         key_name: None,
         project_id: None,
         endpoint: default_endpoint(),
+        region: default_region(),
+        models: ModelSelection::default(),
         oauth: None,
     }
 }
@@ -219,6 +241,8 @@ fn read_credential(path: &Path) -> Result<Credential> {
         key_name: stored.key_name,
         project_id: stored.project_id,
         endpoint: stored.endpoint.trim_end_matches('/').to_owned(),
+        region: stored.region,
+        models: stored.models,
         oauth: stored.oauth.map(|oauth| OAuthTokens {
             provider: oauth.provider,
             access_token: SecretString::from(oauth.access_token),
@@ -238,6 +262,8 @@ pub fn save_credential(path: &Path, credential: &Credential) -> Result<()> {
         key_name: credential.key_name.clone(),
         project_id: credential.project_id.clone(),
         endpoint: credential.endpoint.clone(),
+        region: credential.region,
+        models: credential.models.clone(),
         oauth: credential.oauth.as_ref().map(|oauth| StoredOAuthTokens {
             provider: oauth.provider,
             access_token: oauth.access_token.expose_secret().to_owned(),

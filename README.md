@@ -1,6 +1,6 @@
 # AstraFlow CLI
 
-`astf` is a Rust CLI that signs a user into UCloud, selects an AstraFlow ModelVerse API key, and launches local coding-agent harnesses with the correct provider environment.
+`astf` is a Rust CLI that signs a user into UCloud, selects an AstraFlow ModelVerse API key and region, and launches local coding agents with an explicit AstraFlow endpoint, credential, provider, and compatible model.
 
 ```text
 login → default UCloud project → choose/create ModelVerse API key → ready
@@ -32,7 +32,7 @@ By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTF_VERSION=0.1.0 ASTF_INSTALL_DIR="$HOME/bin" sh
+  ASTF_VERSION=0.2.0 ASTF_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -41,14 +41,25 @@ For a source install, Rust 1.88 or newer is required:
 cargo install --git https://github.com/mfzzf/astraflow-cli --locked
 ```
 
-Then sign in and launch an agent:
+Then choose a region, sign in, and launch an agent:
 
 ```bash
-astf login
+astf login --region singapore
 astf codex
 ```
 
-The first interactive login asks for English or Chinese. It opens UCloud OAuth in the browser, resolves the account's default project, lists enabled UMInfer keys, and asks which key to use. If no key exists, it creates one named `AstraFlow Agent`. `--lang en|zh` overrides and saves the language.
+The first interactive login asks for English or Chinese and one of four ModelVerse access regions. It opens UCloud OAuth in the browser, resolves the account's default project, lists enabled UMInfer keys, and asks which key to use. If no key exists, it creates one named `AstraFlow Agent`. `--lang en|zh` overrides and saves the language.
+
+| `--region` value | ModelVerse endpoint |
+| --- | --- |
+| `china` | `https://api.modelverse.cn` |
+| `singapore` | `https://api-sg.umodelverse.ai` |
+| `los-angeles` | `https://api-us-ca.umodelverse.ai` |
+| `frankfurt` | `https://api-ge-fra.umodelverse.ai` |
+
+Login reads the selected region's `/v1/models` endpoint to learn which model IDs the key can use. OAuth login also correlates those IDs with the read-only UCloud model-square catalog and detail endpoints, so Codex receives a Responses-capable model, Claude receives an Anthropic-capable model, and the other harnesses receive a Chat Completions-capable model. If catalog access is denied, `astf` falls back to conservative model-name detection.
+
+See the [ModelVerse quick start](https://astraflow.ucloud.cn/docs/modelverse/quick-start) and an [example model playground/detail page](https://astraflow.ucloud.cn/modelverse/playground/umodel-1781663242).
 
 For SSH, keep the command running and use:
 
@@ -71,12 +82,16 @@ The surface follows Ori's local-harness workflow:
 - `harness-doctor`, `harness list|inspect|test`, `workspace`, `vault-tunnel`, `eval`
 - global `--json`/`--agent`, `--human`/`--tty`, `--wizard`, `--lang`, `--log-level`, and `--completions`
 
-Arguments after a harness command pass through unchanged:
+Use the wrapper-level `--model` to force a model. Arguments after `--` pass through unchanged:
 
 ```bash
-astf codex -- --model gpt-5
+astf codex --model gpt-5-mini -- --full-auto
 astf claude -- --permission-mode plan
 ```
+
+The wrapper's provider and model selection has higher precedence than existing user defaults. Codex receives per-invocation `-c` values; Claude receives explicit model and gateway variables; OpenCode receives its final in-memory config layer; DSH receives a final patch; Grok, Pi, and Prime receive a named `astraflow` provider plus explicit CLI selection; Hermes runs with an isolated per-launch provider config. API keys are passed through process environment only, never written into those harness config files.
+
+The adapters track the official configuration contracts for [Claude Code](https://code.claude.com/docs/en/llm-gateway), [Codex CLI](https://developers.openai.com/codex/config-reference/), [Grok Build](https://github.com/xai-org/grok-build), [OpenCode](https://opencode.ai/docs/providers/), [Hermes Agent](https://github.com/NousResearch/hermes-agent), [Pi](https://github.com/earendil-works/pi), [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness), and [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent).
 
 Pipes default to one JSON document on stdout. Use `--human` to force human text.
 
@@ -96,6 +111,8 @@ The UCloud control-plane client intentionally exposes only:
 - `GetProjectList`
 - `ListUMInferAPIKey`
 - `CreateUMInferAPIKey`
+- `ListUFSquareModel` (read-only model catalog)
+- `GetUFSquareModelDetail` (read-only protocol capabilities)
 - `GetUMInferRequestLogDetail` (read-only, signature-authenticated verification only)
 
 There is no delete/update/resource-management operation. Public/private UCloud keys are accepted only through process environment variables during explicit `harness test --live --verify-usage` and are never stored.
@@ -108,20 +125,20 @@ astf vault-tunnel --exec codex
 
 ## Injection verification
 
-Local (no model request):
+Local executable/configuration check (no model request):
 
 ```bash
 astf harness test codex
 ```
 
-One minimal model request plus the request-log detail check:
+Run the real harness with one minimal prompt, then optionally perform the request-log detail check:
 
 ```bash
 UCLOUD_PUBLIC_KEY=… UCLOUD_PRIVATE_KEY=… \
   astf harness test codex --live --verify-usage --model <text-model>
 ```
 
-The live probe asks for exactly `ASTRAFLOW_OK` with a 12-token cap. Usage verification retries at most three times because log ingestion may be slightly delayed.
+The live prompt asks for exactly `ASTRAFLOW_OK`. Usage verification uses one separate 12-token Chat Completions probe to obtain a request ID, then retries the read-only log lookup at most three times because ingestion may be slightly delayed.
 
 ## Development and releases
 
@@ -132,15 +149,18 @@ docker compose run --rm dev
 docker build --target runtime -t astraflow-cli .
 docker run --rm astraflow-cli --help
 
-# Optional image with a pinned real Codex CLI for wrapper smoke tests
-docker build --target harness-smoke -t astraflow-harness-smoke .
+# Pinned image containing all eight real CLIs and hostile user configs
+docker build --target harness-all -t astraflow-harness-all .
+docker run --rm astraflow-harness-all
 ```
 
-Pushes to `main` run formatting, tests, and Clippy on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.1.0`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
+Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.0`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
 
 ## 中文说明
 
-`astf login` 会先选择中英文，然后通过浏览器完成 UCloud OAuth 登录，自动获取默认项目，列出可用的 ModelVerse API Key，并让用户选择。若项目中没有 Key，只会创建一个名为 `AstraFlow Agent` 的 UMInfer Key，不会执行其他资源操作。
+`astf login` 会先选择中英文和中国大陆、新加坡、洛杉矶、法兰克福四个接入地域之一，然后通过浏览器完成 UCloud OAuth 登录，自动获取默认项目，列出可用的 ModelVerse API Key，并让用户选择。若项目中没有 Key，只会创建一个名为 `AstraFlow Agent` 的 UMInfer Key，不会执行其他资源操作。
+
+登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，并结合模型广场详情里的协议能力，为 Codex 选择 Responses 模型、为 Claude 选择 Anthropic 模型、为其余 CLI 选择 Chat Completions 模型。启动时 `astf` 会显式覆盖旧的 endpoint、key、provider 和 model 配置。
 
 Linux / macOS 一键安装：
 
@@ -151,7 +171,7 @@ curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh
 常用命令：
 
 ```bash
-astf --lang zh login
+astf --lang zh login --region china
 astf auth
 astf codex
 astf claude

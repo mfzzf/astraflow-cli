@@ -30,6 +30,46 @@ pub enum CompletionShell {
     Sh,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelVerseRegion {
+    /// Mainland China
+    China,
+    /// Singapore
+    Singapore,
+    /// Los Angeles
+    LosAngeles,
+    /// Frankfurt
+    Frankfurt,
+}
+
+impl ModelVerseRegion {
+    pub const ALL: [Self; 4] = [
+        Self::China,
+        Self::Singapore,
+        Self::LosAngeles,
+        Self::Frankfurt,
+    ];
+
+    pub fn endpoint(self) -> &'static str {
+        match self {
+            Self::China => "https://api.modelverse.cn",
+            Self::Singapore => "https://api-sg.umodelverse.ai",
+            Self::LosAngeles => "https://api-us-ca.umodelverse.ai",
+            Self::Frankfurt => "https://api-ge-fra.umodelverse.ai",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::China => "China / 中国大陆",
+            Self::Singapore => "Singapore / 新加坡",
+            Self::LosAngeles => "Los Angeles / 洛杉矶",
+            Self::Frankfurt => "Frankfurt / 法兰克福",
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "astf",
@@ -172,6 +212,10 @@ pub struct LoginArgs {
     /// Associate an imported API key with a project
     #[arg(long)]
     pub project_id: Option<String>,
+
+    /// ModelVerse access region
+    #[arg(long, value_enum)]
+    pub region: Option<ModelVerseRegion>,
 }
 
 #[derive(Debug, Args)]
@@ -179,6 +223,10 @@ pub struct HarnessLaunchArgs {
     /// Override the harness executable
     #[arg(long)]
     pub binary: Option<PathBuf>,
+
+    /// Override the AstraFlow-selected model for this launch
+    #[arg(long)]
+    pub model: Option<String>,
 
     /// Arguments passed through to the harness
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -215,7 +263,7 @@ pub enum HarnessCommand {
     List,
     /// Show executable and environment details without revealing secrets
     Inspect { name: String },
-    /// Run a child-process injection probe
+    /// Run the real installed harness with AstraFlow injection
     Test(HarnessTestArgs),
 }
 

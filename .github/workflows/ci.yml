@@ -38,3 +38,14 @@ jobs:
           (cd "$fixture" && sha256sum "astf-${target}.tar.gz" > SHA256SUMS)
           ASTF_RELEASE_BASE_URL="file://$fixture" ASTF_INSTALL_DIR="$fixture/bin" ./install.sh
           "$fixture/bin/astf" --json version
+
+  harness-routing:
+    name: Eight real CLI routing checks (self-hosted)
+    runs-on: [self-hosted, linux, x64, rust, astraflow-cli]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build pinned harness image
+        run: docker build --target harness-all -t astraflow-harness-all:ci .
+      - name: Verify hostile config cannot win
+        run: docker run --rm astraflow-harness-all:ci
