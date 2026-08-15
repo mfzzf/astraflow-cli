@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.7 — 2026-08-15
+
+- Built both Linux GNU release targets inside Rust 1.88 Bookworm containers so published binaries run on glibc 2.36 systems such as Debian 12 instead of requiring the build runner's glibc 2.39.
+- Executed each Linux release binary inside its Debian 12 build container before packaging it.
+
 ## 0.2.6 — 2026-08-15
 
 - Isolated Codex, Grok, Hermes, Pi, Prime Agent, and DSH from conflicting user, project, profile, and managed configuration during wrapped launches.

@@ -9,8 +9,9 @@ permissions:
 
 jobs:
   linux-x64:
-    name: Linux x64 (self-hosted)
+    name: Linux x64 (Debian 12)
     runs-on: [self-hosted, linux, x64, rust, astraflow-cli]
+    container: rust:1.88-bookworm
     timeout-minutes: 30
     env:
       TARGET: x86_64-unknown-linux-gnu
@@ -19,9 +20,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build
         run: |
-          rustup toolchain install 1.88.0 --profile minimal
-          rustup target add "$TARGET" --toolchain 1.88.0
-          cargo +1.88.0 build --release --locked --target "$TARGET"
+          rustup target add "$TARGET"
+          cargo build --release --locked --target "$TARGET"
+          "target/${TARGET}/release/astraflow" --json version
           tar -czf "astraflow-${TARGET}.tar.gz" -C "target/${TARGET}/release" astraflow
       - uses: actions/upload-artifact@v7
         with:
@@ -30,8 +31,9 @@ jobs:
           if-no-files-found: error
 
   linux-arm64:
-    name: Linux arm64
+    name: Linux arm64 (Debian 12)
     runs-on: ubuntu-24.04-arm
+    container: rust:1.88-bookworm
     timeout-minutes: 30
     env:
       TARGET: aarch64-unknown-linux-gnu
@@ -40,9 +42,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build
         run: |
-          rustup toolchain install 1.88.0 --profile minimal
-          rustup target add "$TARGET" --toolchain 1.88.0
-          cargo +1.88.0 build --release --locked --target "$TARGET"
+          rustup target add "$TARGET"
+          cargo build --release --locked --target "$TARGET"
+          "target/${TARGET}/release/astraflow" --json version
           tar -czf "astraflow-${TARGET}.tar.gz" -C "target/${TARGET}/release" astraflow
       - uses: actions/upload-artifact@v7
         with:
