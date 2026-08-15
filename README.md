@@ -32,7 +32,7 @@ By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTRAFLOW_VERSION=0.3.0 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
+  ASTRAFLOW_VERSION=0.3.1 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -41,9 +41,12 @@ For a source install, Rust 1.88 or newer is required:
 cargo install --git https://github.com/mfzzf/astraflow-cli --locked
 ```
 
-The Rust package is named `astraflow`; the installed command is `astraflow`. `astraflow update`
-checks `mfzzf/astraflow-cli` GitHub Releases and installs the checksummed release binary,
-so it does not require a crates.io package.
+The Rust package is named `astraflow`; the installed command is `astraflow`. In an interactive
+terminal AstraFlow checks GitHub Releases at most once every 24 hours. When an update is available,
+it presents **Update now**, **Remind me later**, and **Skip this version**. Skipping suppresses that
+exact release but allows the next release to appear. `astraflow update` remains available for an
+explicit checksummed upgrade, and `ASTRAFLOW_NO_UPDATE_CHECK=1` disables automatic checks. No
+crates.io package is required.
 
 Run `astraflow` or `astraflow login` for first-time setup, then launch an agent:
 
@@ -126,7 +129,7 @@ The surface follows Ori's local-harness workflow:
 - `harness-doctor`, `harness list|inspect|test`, `workspace`, `vault-tunnel`, `eval`
 - global `--config`, `--json`/`--agent`, `--human`/`--tty`, `--wizard`, `--lang`, `--log-level`, and `--completions`
 
-In an interactive terminal every harness command opens a cross-platform Ratatui model picker even when `--model` is omitted. Its bordered, responsive interface includes role tabs, direct search, and a scrollable highlighted model table. Normal-width terminals align pricing into separate `Input / 1M`, `Cache / 1M`, and `Output / 1M` columns; narrow terminals fall back to one compact price column, and the selected model's complete raw pricing remains visible below. Up/Down selects, Tab/Shift+Tab or Left/Right switches model roles, `D` saves the complete AstraFlow default combination, Enter launches, and Esc cancels. Pi and Prime also use Space to toggle multiple models in their Ctrl+P cycle pool. Prices come from the current Key's authenticated `/v1/models` response; image/video/audio charges are hidden from this text-agent picker.
+In an interactive terminal every harness command opens a cross-platform Ratatui model picker even when `--model` is omitted. Its bordered, responsive interface includes role tabs, direct search, and a scrollable highlighted model table. Wide terminals show four professional starting-price columns—`Input`, `Cache Read`, `Cache Create`, and `Output`—alongside the model name. The selected model is rendered below as a context-tier table with `Input`, `Cache Read`, `Create 5 min`, `Create 1 hour`, optional hourly cache storage, and `Output`, so long-context and prompt-cache rates are not collapsed into one sentence. Narrow terminals use compact starting-price tables while retaining clear price categories. Up/Down selects, Tab/Shift+Tab or Left/Right switches model roles, `D` saves the complete AstraFlow default combination, Enter launches, and Esc cancels. Pi and Prime also use Space to toggle multiple models in their Ctrl+P cycle pool. Prices come from the current Key's authenticated `/v1/models` response; image/video/audio charges are hidden from this text-agent picker.
 
 Use `--model <MODEL>` to bypass the picker and specify the primary model directly. A value-less `--model` explicitly requests the picker and therefore fails in a non-interactive script instead of guessing. Ordinary arguments after `--` pass through to the harness:
 
@@ -229,7 +232,7 @@ docker build --target harness-all -t astraflow-harness-all .
 docker run --rm astraflow-harness-all
 ```
 
-Pushes to `main` run formatting, tests, Clippy, and hostile-config routing checks with pinned Claude Code 2.1.233, Codex CLI 0.147.0, Grok Build 1.0.4, OpenCode 1.18.18, Hermes Agent 0.19.0, Pi 0.84.2 and 0.73.1, DeepSeek Harness 0.1.0-rc.6, and Prime Agent 0.7.2 on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.3.0`, build Linux GNU binaries inside Rust 1.88 Bookworm containers for glibc 2.36 compatibility, plus native macOS Intel/Apple Silicon and Windows x64/ARM64 archives, before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
+Pushes to `main` run formatting, tests, Clippy, and hostile-config routing checks with pinned Claude Code 2.1.233, Codex CLI 0.147.0, Grok Build 1.0.4, OpenCode 1.18.18, Hermes Agent 0.19.0, Pi 0.84.2 and 0.73.1, DeepSeek Harness 0.1.0-rc.6, and Prime Agent 0.7.2 on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.3.1`, build Linux GNU binaries inside Rust 1.88 Bookworm containers for glibc 2.36 compatibility, plus native macOS Intel/Apple Silicon and Windows x64/ARM64 archives, before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
 
 ## 中文说明
 
@@ -239,7 +242,9 @@ Pushes to `main` run formatting, tests, Clippy, and hostile-config routing check
 
 登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，不再调用模型详情接口。在后续接入可维护的协议能力数据之前，所有对话文本模型都会同时出现在 Claude Code、Codex 和其他 agent 的模型选择器中，不再按 Claude、GPT、o-series 或 Codex 名称过滤。图片、视频、音频生成、Embedding、Rerank、OCR 和 Batch 模型仍会被排除，视觉语言对话模型保留。所有协议都优先使用 `deepseek-v4-flash-0731`，否则选择认证模型列表中最新的可用文本模型；重新执行 `astraflow login` 即可刷新。
 
-交互式模型选择器使用 Ratatui 和 Crossterm 构建，提供角色标签页、即时搜索、可滚动高亮模型表格、紧凑价格摘要和当前模型完整价格；在 Linux、macOS 与 Windows 终端中使用同一套键盘操作和自动终端恢复逻辑。
+交互式模型选择器使用 Ratatui 和 Crossterm 构建。宽终端的模型列表分别展示 Input、Cache Read、Cache Create、Output 四项起价；下方再按上下文档位用表格展示 Input、Cache Read、Create 5 分钟、Create 1 小时、可选的按小时缓存存储和 Output 完整价格，不再把不同上下文和缓存类型拼成一行。窄终端会切换为紧凑起价表格。
+
+交互式启动时每天最多检查一次 GitHub Release。发现新版本会显示 Update now、Remind me later、Skip this version 三个选项；跳过仅针对当前版本，下一个版本仍会提示。可通过 `ASTRAFLOW_NO_UPDATE_CHECK=1` 关闭自动检查，也可以随时运行 `astraflow update` 主动更新。
 
 启动 harness 时，`astraflow` 会隔离用户、项目和本地配置，并显式固定 endpoint、key、provider 和 model。`--` 后仍可传递普通参数，但会拒绝能够覆盖路由的内部 model/provider/config/profile/patch/plugin/extension 参数；请使用外层 `astraflow <harness> --model ...` 选择模型。DSH 例外允许由 AstraFlow 管理的 `--profile web` 和 `--profile headless`，但仍禁止自定义 profile 与 patch 覆盖。
 

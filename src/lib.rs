@@ -8,3 +8,4 @@ pub mod oauth;
 pub mod output;
 pub mod proxy;
 pub mod ucloud;
+pub mod update_prompt;

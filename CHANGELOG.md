@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-08-16
+
+- Split text pricing into Input, Cache Read, Cache Create, and Output starting-price columns, with distinct 5-minute and 1-hour cache creation rates.
+- Replaced the selected model's raw price sentence with a context-tier table that preserves long-context pricing boundaries.
+- Added a best-effort daily release check with Update now, Remind me later, and Skip this version choices.
+
 ## 0.3.0 — 2026-08-15
 
 - Split model pricing into aligned Input, Cache, and Output columns on normal-width terminals, with a compact responsive fallback for narrow terminals.

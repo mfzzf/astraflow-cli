@@ -1,12 +1,12 @@
 use crate::config::HarnessModelSettings;
-use crate::modelverse::{AvailableModel, compact_price_summary, price_columns, price_summary};
+use crate::modelverse::{AvailableModel, compact_price_summary, price_columns, price_tiers};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs, Wrap},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs},
 };
 use std::collections::BTreeMap;
 
@@ -275,10 +275,10 @@ impl ModelPicker {
             ]));
         let inner = outer.inner(area);
         frame.render_widget(outer, area);
-        if inner.width < 30 || inner.height < 12 {
+        if inner.width < 30 || inner.height < 20 {
             frame.render_widget(
                 Paragraph::new(
-                    "Terminal is too small / 终端窗口太小\nPlease resize to at least 30 × 12",
+                    "Terminal is too small / 终端窗口太小\nPlease resize to at least 30 × 20",
                 )
                 .style(Style::default().fg(Color::Yellow))
                 .block(
@@ -291,11 +291,23 @@ impl ModelPicker {
             return;
         }
 
+        let selected_model = self
+            .models
+            .iter()
+            .find(|model| model.id.eq_ignore_ascii_case(self.current_cursor()));
+        let tier_count = selected_model
+            .map(price_tiers)
+            .map_or(0, |tiers| tiers.len());
+        let detail_height = if inner.width >= 100 {
+            u16::try_from(tier_count.saturating_add(4).clamp(6, 9)).unwrap_or(9)
+        } else {
+            9
+        };
         let [tabs_area, search_area, models_area, detail_area, help_area] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Min(5),
-            Constraint::Length(4),
+            Constraint::Length(detail_height),
             Constraint::Length(3),
         ])
         .areas(inner);
@@ -380,7 +392,7 @@ impl ModelPicker {
                         .eq_ignore_ascii_case(self.current_cursor())
                 })
                 .unwrap_or(0);
-            let split_prices = models_area.width >= 72;
+            let split_prices = models_area.width >= 100;
             let rows = matches.iter().map(|index| {
                 let model = &self.models[*index];
                 let marker = if self.current_slot().multiple {
@@ -402,7 +414,8 @@ impl ModelPicker {
                     let prices = price_columns(model);
                     cells.extend([
                         Cell::from(prices.input),
-                        Cell::from(prices.cache),
+                        Cell::from(prices.cache_read),
+                        Cell::from(prices.cache_create),
                         Cell::from(prices.output),
                     ]);
                 } else {
@@ -412,12 +425,19 @@ impl ModelPicker {
             });
             let (headers, widths, spacing) = if split_prices {
                 (
-                    vec!["MODEL", "INPUT / 1M", "CACHE / 1M", "OUTPUT / 1M"],
                     vec![
-                        Constraint::Percentage(38),
-                        Constraint::Percentage(17),
-                        Constraint::Percentage(28),
-                        Constraint::Percentage(17),
+                        "MODEL",
+                        "INPUT / 1M",
+                        "CACHE READ / 1M",
+                        "CACHE CREATE / 1M",
+                        "OUTPUT / 1M",
+                    ],
+                    vec![
+                        Constraint::Percentage(34),
+                        Constraint::Percentage(14),
+                        Constraint::Percentage(18),
+                        Constraint::Percentage(20),
+                        Constraint::Percentage(14),
                     ],
                     1,
                 )
@@ -455,25 +475,7 @@ impl ModelPicker {
             frame.render_stateful_widget(table, models_area, &mut state);
         }
 
-        let detail = self
-            .models
-            .iter()
-            .find(|model| model.id.eq_ignore_ascii_case(self.current_cursor()))
-            .map(price_summary)
-            .unwrap_or_else(|| "Price unavailable".to_owned());
-        frame.render_widget(
-            Paragraph::new(detail)
-                .style(Style::default().fg(Color::Gray))
-                .wrap(Wrap { trim: true })
-                .block(
-                    Block::new()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .border_style(Style::default().fg(Color::DarkGray))
-                        .title(" Selected price / 当前模型价格 "),
-                ),
-            detail_area,
-        );
+        self.render_price_detail(frame, detail_area, selected_model);
 
         let mut help = vec![Line::from(vec![
             key("Tab / ←→"),
@@ -503,6 +505,106 @@ impl ModelPicker {
             ),
             help_area,
         );
+    }
+
+    fn render_price_detail(
+        &self,
+        frame: &mut Frame<'_>,
+        area: ratatui::layout::Rect,
+        model: Option<&AvailableModel>,
+    ) {
+        let Some(model) = model else {
+            return;
+        };
+        let title = format!(" Pricing details · {} / 分档价格 ", model.id);
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::DarkGray))
+            .title(title);
+        let tiers = price_tiers(model);
+        if tiers.is_empty() {
+            frame.render_widget(
+                Paragraph::new("Price unavailable / 暂无价格")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .block(block),
+                area,
+            );
+            return;
+        }
+
+        let header_style = Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
+        if area.width >= 100 {
+            let rows = tiers.iter().map(|tier| {
+                Row::new(vec![
+                    tier.condition.clone(),
+                    tier.input.clone(),
+                    tier.cache_read.clone(),
+                    tier.cache_create_5m.clone(),
+                    tier.cache_create_1h.clone(),
+                    tier.cache_storage.clone(),
+                    tier.output.clone(),
+                ])
+            });
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Percentage(28),
+                    Constraint::Percentage(12),
+                    Constraint::Percentage(13),
+                    Constraint::Percentage(14),
+                    Constraint::Percentage(14),
+                    Constraint::Percentage(11),
+                    Constraint::Percentage(8),
+                ],
+            )
+            .header(
+                Row::new([
+                    "CONTEXT",
+                    "INPUT",
+                    "CACHE READ",
+                    "CREATE 5 MIN",
+                    "CREATE 1 HOUR",
+                    "STORAGE / H",
+                    "OUTPUT",
+                ])
+                .style(header_style)
+                .bottom_margin(1),
+            )
+            .column_spacing(1)
+            .block(block);
+            frame.render_widget(table, area);
+        } else {
+            let prices = price_columns(model);
+            let rows = [
+                Row::new(["Input", prices.input.as_str()]),
+                Row::new(["Cache read", prices.cache_read.as_str()]),
+                Row::new(["Cache create", prices.cache_create.as_str()]),
+                Row::new([
+                    "Cache storage",
+                    tiers
+                        .iter()
+                        .map(|tier| tier.cache_storage.as_str())
+                        .find(|price| *price != "—")
+                        .unwrap_or("—"),
+                ]),
+                Row::new(["Output", prices.output.as_str()]),
+            ];
+            let table = Table::new(
+                rows,
+                [Constraint::Percentage(45), Constraint::Percentage(55)],
+            )
+            .header(
+                Row::new(["STARTING PRICE / 起价", "RATE / 1M TOKENS"])
+                    .style(header_style)
+                    .bottom_margin(1),
+            )
+            .column_spacing(2)
+            .block(block);
+            frame.render_widget(table, area);
+        }
     }
 }
 
@@ -543,6 +645,28 @@ mod tests {
             id: id.into(),
             created: 0,
             pricing: Vec::new(),
+        }
+    }
+
+    fn priced_model(id: &str) -> AvailableModel {
+        let rate = |condition: &str, charge_item: &str, price: &str| crate::modelverse::ModelRate {
+            condition: condition.to_owned(),
+            charge_item: charge_item.to_owned(),
+            price: price.to_owned(),
+            currency: "CNY".to_owned(),
+            unit: "Million Tokens".to_owned(),
+        };
+        AvailableModel {
+            id: id.into(),
+            created: 0,
+            pricing: vec![
+                rate("Input length (0, 200K]", "input", "14.4"),
+                rate("Input length (0, 200K]", "cache_read", "3.6"),
+                rate("Input length (0, 200K]", "cache_write_5m", "18"),
+                rate("Input length (0, 200K]", "output", "43.2"),
+                rate("Input length (200K, 1M]", "input", "28.8"),
+                rate("Input length (200K, 1M]", "output", "86.4"),
+            ],
         }
     }
 
@@ -618,7 +742,7 @@ mod tests {
         use ratatui::{Terminal, backend::TestBackend};
 
         let picker = ModelPicker::new(
-            vec![model("deepseek-v4-flash-0731"), model("glm-5.2")],
+            vec![priced_model("grok-4.6"), model("glm-5.2")],
             vec![ModelSlot {
                 key: "default",
                 label: "Default",
@@ -626,7 +750,7 @@ mod tests {
             }],
             HarnessModelSettings::default(),
         );
-        let backend = TestBackend::new(100, 24);
+        let backend = TestBackend::new(140, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| picker.render(frame, "Saved as AstraFlow defaults"))
@@ -636,10 +760,14 @@ mod tests {
             "AstraFlow",
             "Model Picker",
             "Search",
-            "deepseek-v4-flash-0731",
+            "grok-4.6",
             "INPUT / 1M",
-            "CACHE / 1M",
+            "CACHE READ / 1M",
+            "CACHE CREATE / 1M",
             "OUTPUT / 1M",
+            "CONTEXT",
+            "CREATE 5 MIN",
+            "Input length (0, 200K]",
             "Saved as AstraFlow defaults",
         ] {
             assert!(
@@ -654,5 +782,6 @@ mod tests {
         let rendered = terminal.backend().to_string();
         assert!(rendered.contains("TOKEN PRICE"));
         assert!(!rendered.contains("INPUT / 1M"));
+        assert!(rendered.contains("STARTING PRICE"));
     }
 }

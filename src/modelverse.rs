@@ -19,6 +19,7 @@ pub struct AvailableModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRate {
+    pub condition: String,
     pub charge_item: String,
     pub price: String,
     pub currency: String,
@@ -28,9 +29,24 @@ pub struct ModelRate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriceColumns {
     pub input: String,
-    pub cache: String,
+    pub cache_read: String,
+    pub cache_create: String,
     pub output: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PriceTier {
+    pub condition: String,
+    pub input: String,
+    pub cache_read: String,
+    pub cache_create_5m: String,
+    pub cache_create_1h: String,
+    pub cache_storage: String,
+    pub output: String,
+}
+
+type DisplayRate = (String, String);
+type TierRates = BTreeMap<&'static str, DisplayRate>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatProbe {
@@ -134,15 +150,20 @@ pub fn compact_price_summary(model: &AvailableModel) -> String {
         return "Price unavailable".to_owned();
     }
     let groups = grouped_prices(model);
-    [("input", "in"), ("cache", "cache"), ("output", "out")]
-        .into_iter()
-        .filter_map(|(key, label)| {
-            groups
-                .get(key)
-                .map(|values| format!("{label} {}", format_price_group(values, "–", true)))
-        })
-        .collect::<Vec<_>>()
-        .join(" · ")
+    [
+        ("input", "Input"),
+        ("cache_read", "Cache read"),
+        ("cache_create", "Cache create"),
+        ("output", "Output"),
+    ]
+    .into_iter()
+    .filter_map(|(key, label)| {
+        groups
+            .get(key)
+            .map(|values| format!("{label} {}", starting_price(values, true)))
+    })
+    .collect::<Vec<_>>()
+    .join(" · ")
 }
 
 pub fn price_columns(model: &AvailableModel) -> PriceColumns {
@@ -150,15 +171,65 @@ pub fn price_columns(model: &AvailableModel) -> PriceColumns {
     let column = |key| {
         groups
             .get(key)
-            .map(|values| format_price_group(values, " · ", false))
+            .map(|values| starting_price(values, false))
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "—".to_owned())
     };
     PriceColumns {
         input: column("input"),
-        cache: column("cache"),
+        cache_read: column("cache_read"),
+        cache_create: column("cache_create"),
         output: column("output"),
     }
+}
+
+pub fn price_tiers(model: &AvailableModel) -> Vec<PriceTier> {
+    let mut tiers: Vec<(String, TierRates)> = Vec::new();
+    for rate in &model.pricing {
+        let Some(item) = normalized_text_charge_item(&rate.charge_item) else {
+            continue;
+        };
+        let condition = if rate.condition.trim().is_empty() {
+            "Default".to_owned()
+        } else {
+            rate.condition.clone()
+        };
+        let position = tiers
+            .iter()
+            .position(|(candidate, _)| candidate == &condition)
+            .unwrap_or_else(|| {
+                tiers.push((condition.clone(), BTreeMap::new()));
+                tiers.len() - 1
+            });
+        tiers[position]
+            .1
+            .entry(item)
+            .or_insert_with(|| display_price(rate));
+    }
+    tiers
+        .into_iter()
+        .map(|(condition, rates)| {
+            let value = |key| {
+                rates
+                    .get(key)
+                    .map(|value| format_price_group(std::slice::from_ref(value), "", false))
+                    .unwrap_or_else(|| "—".to_owned())
+            };
+            PriceTier {
+                condition,
+                input: value("input"),
+                cache_read: value("cache_read"),
+                cache_create_5m: rates
+                    .get("cache_create_5m")
+                    .or_else(|| rates.get("cache_create"))
+                    .map(|value| format_price_group(std::slice::from_ref(value), "", false))
+                    .unwrap_or_else(|| "—".to_owned()),
+                cache_create_1h: value("cache_create_1h"),
+                cache_storage: value("cache_storage"),
+                output: value("output"),
+            }
+        })
+        .collect()
 }
 
 fn grouped_prices(model: &AvailableModel) -> BTreeMap<&'static str, Vec<(String, String)>> {
@@ -167,28 +238,62 @@ fn grouped_prices(model: &AvailableModel) -> BTreeMap<&'static str, Vec<(String,
         let Some(item) = normalized_text_charge_item(&rate.charge_item) else {
             continue;
         };
-        let currency = if rate.currency.eq_ignore_ascii_case("CNY") {
-            "¥"
+        let group = if item.starts_with("cache_create") {
+            "cache_create"
         } else {
-            rate.currency.as_str()
+            item
         };
-        let unit = if rate
-            .unit
-            .to_ascii_lowercase()
-            .replace(' ', "")
-            .contains("milliontokens")
-        {
-            "1M".to_owned()
-        } else {
-            rate.unit.clone()
-        };
-        let value = (format!("{currency}{}", rate.price), unit);
-        let values = groups.entry(item).or_default();
+        let value = display_price(rate);
+        let values = groups.entry(group).or_default();
         if !values.contains(&value) {
             values.push(value);
         }
     }
     groups
+}
+
+fn display_price(rate: &ModelRate) -> (String, String) {
+    let currency = if rate.currency.eq_ignore_ascii_case("CNY") {
+        "¥"
+    } else {
+        rate.currency.as_str()
+    };
+    let unit = if rate.charge_item.to_ascii_lowercase().contains("storage")
+        && (rate.unit.trim().is_empty() || rate.unit == "unit")
+    {
+        "token-hour".to_owned()
+    } else if rate
+        .unit
+        .to_ascii_lowercase()
+        .replace(' ', "")
+        .contains("milliontokens")
+    {
+        "1M".to_owned()
+    } else {
+        rate.unit.clone()
+    };
+    (format!("{currency}{}", rate.price), unit)
+}
+
+fn starting_price(values: &[(String, String)], include_unit: bool) -> String {
+    let minimum = values.iter().min_by(|left, right| {
+        numeric_price(&left.0)
+            .partial_cmp(&numeric_price(&right.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    minimum
+        .map(|value| {
+            let price = format_price_group(std::slice::from_ref(value), "", include_unit);
+            format!("{price} 起")
+        })
+        .unwrap_or_else(|| "—".to_owned())
+}
+
+fn numeric_price(value: &str) -> f64 {
+    value
+        .trim_start_matches(|character: char| !character.is_ascii_digit() && character != '.')
+        .parse()
+        .unwrap_or(f64::INFINITY)
 }
 
 fn format_price_group(values: &[(String, String)], separator: &str, include_unit: bool) -> String {
@@ -220,19 +325,24 @@ fn parse_pricing(entry: &Value) -> Vec<ModelRate> {
         .into_iter()
         .flatten()
         .flat_map(|condition| {
+            let context = condition
+                .get("DescriptionEn")
+                .or_else(|| condition.get("Condition"))
+                .or_else(|| condition.get("Description"))
+                .and_then(Value::as_str)
+                .unwrap_or("Default")
+                .to_owned();
             condition
                 .get("Rates")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
+                .map(move |rate| (context.clone(), rate))
         })
-        .filter_map(|rate| {
+        .filter_map(|(condition, rate)| {
             let charge_item = rate.get("ChargeItem")?.as_str()?.to_owned();
             normalized_text_charge_item(&charge_item)?;
-            let price = rate.get("Price").map(|value| match value {
-                Value::String(value) => value.clone(),
-                value => value.to_string(),
-            })?;
+            let price = rate.get("Price").map(format_price_value)?;
             let currency = rate
                 .get("Currency")
                 .and_then(Value::as_str)
@@ -240,11 +350,17 @@ fn parse_pricing(entry: &Value) -> Vec<ModelRate> {
                 .to_owned();
             let unit = rate
                 .get("UnitEn")
-                .or_else(|| rate.get("Unit"))
                 .and_then(Value::as_str)
+                .filter(|unit| !unit.trim().is_empty())
+                .or_else(|| {
+                    rate.get("Unit")
+                        .and_then(Value::as_str)
+                        .filter(|unit| !unit.trim().is_empty())
+                })
                 .unwrap_or("unit")
                 .to_owned();
             Some(ModelRate {
+                condition,
                 charge_item,
                 price,
                 currency,
@@ -254,13 +370,37 @@ fn parse_pricing(entry: &Value) -> Vec<ModelRate> {
         .collect()
 }
 
+fn format_price_value(value: &Value) -> String {
+    match value {
+        Value::String(value) => value.clone(),
+        Value::Number(value) => value.as_f64().map_or_else(
+            || value.to_string(),
+            |value| {
+                let fixed = format!("{value:.12}");
+                fixed.trim_end_matches('0').trim_end_matches('.').to_owned()
+            },
+        ),
+        value => value.to_string(),
+    }
+}
+
 fn normalized_text_charge_item(item: &str) -> Option<&'static str> {
     let item = item.to_ascii_lowercase();
     if item.contains("image") || item.contains("video") || item.contains("audio") {
         return None;
     }
-    if item.contains("cache") {
-        Some("cache")
+    if item.contains("cache") && item.contains("storage") {
+        Some("cache_storage")
+    } else if item.contains("cache") && (item.contains("write") || item.contains("create")) {
+        if item.contains("1h") || item.contains("1_hour") {
+            Some("cache_create_1h")
+        } else if item.contains("5m") || item.contains("5_min") {
+            Some("cache_create_5m")
+        } else {
+            Some("cache_create")
+        }
+    } else if item.contains("cache") {
+        Some("cache_read")
     } else if item == "input" || item.contains("input_text") || item.contains("input_token") {
         Some("input")
     } else if item == "output" || item.contains("output_text") || item.contains("output_token") {
@@ -487,14 +627,28 @@ mod tests {
     #[test]
     fn picker_pricing_compacts_repeated_cache_tiers() {
         let value = json!({
-            "pricing": [{
-                "Rates": [
-                    {"ChargeItem":"input","Price":36,"Currency":"CNY","UnitEn":"Million Tokens"},
-                    {"ChargeItem":"cache_read","Price":3.6,"Currency":"CNY","UnitEn":"Million Tokens"},
-                    {"ChargeItem":"cache_write","Price":45,"Currency":"CNY","UnitEn":"Million Tokens"},
-                    {"ChargeItem":"output","Price":180,"Currency":"CNY","UnitEn":"Million Tokens"}
-                ]
-            }]
+            "pricing": [
+                {
+                    "DescriptionEn": "Input length (0, 200K]",
+                    "Rates": [
+                        {"ChargeItem":"input","Price":36,"Currency":"CNY","UnitEn":"Million Tokens"},
+                        {"ChargeItem":"cache_read_tokens","Price":3.6,"Currency":"CNY","UnitEn":"Million Tokens"},
+                        {"ChargeItem":"cache_write_5m_tokens","Price":45,"Currency":"CNY","UnitEn":"Million Tokens"},
+                        {"ChargeItem":"cache_write_1h_tokens","Price":72,"Currency":"CNY","UnitEn":"Million Tokens"},
+                        {"ChargeItem":"cache_storage_1h_tokens","Price":0.0000072,"Currency":"CNY","UnitEn":""},
+                        {"ChargeItem":"output","Price":180,"Currency":"CNY","UnitEn":"Million Tokens"}
+                    ]
+                },
+                {
+                    "DescriptionEn": "Input length (200K, 1M]",
+                    "Rates": [
+                        {"ChargeItem":"input","Price":72,"Currency":"CNY","UnitEn":"Million Tokens"},
+                        {"ChargeItem":"cache_read_tokens","Price":7.2,"Currency":"CNY","UnitEn":"Million Tokens"},
+                        {"ChargeItem":"cache_write_5m_tokens","Price":90,"Currency":"CNY","UnitEn":"Million Tokens"},
+                        {"ChargeItem":"output","Price":324,"Currency":"CNY","UnitEn":"Million Tokens"}
+                    ]
+                }
+            ]
         });
         let model = AvailableModel {
             id: "claude-opus-5".to_owned(),
@@ -503,15 +657,39 @@ mod tests {
         };
         assert_eq!(
             compact_price_summary(&model),
-            "in ¥36/1M · cache ¥3.6–¥45/1M · out ¥180/1M"
+            "Input ¥36/1M 起 · Cache read ¥3.6/1M 起 · Cache create ¥45/1M 起 · Output ¥180/1M 起"
         );
         assert_eq!(
             price_columns(&model),
             PriceColumns {
-                input: "¥36".to_owned(),
-                cache: "¥3.6 · ¥45".to_owned(),
-                output: "¥180".to_owned(),
+                input: "¥36 起".to_owned(),
+                cache_read: "¥3.6 起".to_owned(),
+                cache_create: "¥45 起".to_owned(),
+                output: "¥180 起".to_owned(),
             }
+        );
+        assert_eq!(
+            price_tiers(&model),
+            vec![
+                PriceTier {
+                    condition: "Input length (0, 200K]".to_owned(),
+                    input: "¥36".to_owned(),
+                    cache_read: "¥3.6".to_owned(),
+                    cache_create_5m: "¥45".to_owned(),
+                    cache_create_1h: "¥72".to_owned(),
+                    cache_storage: "¥0.0000072/token-hour".to_owned(),
+                    output: "¥180".to_owned(),
+                },
+                PriceTier {
+                    condition: "Input length (200K, 1M]".to_owned(),
+                    input: "¥72".to_owned(),
+                    cache_read: "¥7.2".to_owned(),
+                    cache_create_5m: "¥90".to_owned(),
+                    cache_create_1h: "—".to_owned(),
+                    cache_storage: "—".to_owned(),
+                    output: "¥324".to_owned(),
+                },
+            ]
         );
     }
 

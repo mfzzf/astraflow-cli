@@ -157,6 +157,16 @@ struct Settings {
     default_config: Option<String>,
     #[serde(default)]
     legacy_credentials_migrated: bool,
+    #[serde(default)]
+    last_update_check_at: Option<u64>,
+    #[serde(default)]
+    skipped_update_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpdatePreferences {
+    pub last_checked_at: Option<u64>,
+    pub skipped_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -534,6 +544,26 @@ pub fn save_language(language: Language) -> Result<()> {
     write_private_json(&path, &settings)
 }
 
+pub fn load_update_preferences() -> Result<UpdatePreferences> {
+    let settings = read_settings(&settings_path()?)?;
+    Ok(UpdatePreferences {
+        last_checked_at: settings.last_update_check_at,
+        skipped_version: settings.skipped_update_version,
+    })
+}
+
+pub fn record_update_check(latest: &str, skipped: bool, checked_at: u64) -> Result<()> {
+    let path = settings_path()?;
+    let mut settings = read_settings(&path)?;
+    settings.last_update_check_at = Some(checked_at);
+    if skipped {
+        settings.skipped_update_version = Some(latest.to_owned());
+    } else if settings.skipped_update_version.as_deref() != Some(latest) {
+        settings.skipped_update_version = None;
+    }
+    write_private_json(&path, &settings)
+}
+
 pub fn load_harness_models(
     config_name: Option<&str>,
     harness: &str,
@@ -711,6 +741,8 @@ mod tests {
         let path = temp.path().join("config.json");
         let mut settings = Settings {
             language: Some(Language::Zh),
+            last_update_check_at: Some(1_776_000_000),
+            skipped_update_version: Some("0.3.1".to_owned()),
             ..Settings::default()
         };
         settings.harness_models.insert(
@@ -726,6 +758,8 @@ mod tests {
         write_private_json(&path, &settings).unwrap();
         let loaded = read_settings(&path).unwrap();
         assert_eq!(loaded.language, Some(Language::Zh));
+        assert_eq!(loaded.last_update_check_at, Some(1_776_000_000));
+        assert_eq!(loaded.skipped_update_version.as_deref(), Some("0.3.1"));
         assert_eq!(
             loaded.harness_models["claude"].slots["default"],
             "claude-opus-5"

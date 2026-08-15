@@ -11,6 +11,7 @@ use astraflow::harness::{self, DEFAULT_MODEL_SLOT, Harness};
 use astraflow::i18n::{BANNER, Messages};
 use astraflow::model_picker::ModelPicker;
 use astraflow::output::OutputMode;
+use astraflow::update_prompt::{self, UpdateChoice};
 use astraflow::{modelverse, oauth, proxy, ucloud};
 use clap::{CommandFactory, Parser, error::ErrorKind};
 use clap_complete::generate;
@@ -23,7 +24,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 
 #[tokio::main]
@@ -110,6 +111,10 @@ async fn run(cli: Cli, mode: OutputMode) -> Result<i32> {
     }
     let messages = Messages::new(language);
     let cwd = env::current_dir()?;
+
+    if maybe_prompt_for_update(&command, mode).await? {
+        return Ok(0);
+    }
 
     let Some(command) = command else {
         if mode == OutputMode::Human
@@ -1463,29 +1468,84 @@ const INSTALL_SH_URL: &str =
     "https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh";
 const INSTALL_PS1_URL: &str =
     "https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.ps1";
+const UPDATE_CHECK_INTERVAL: u64 = 24 * 60 * 60;
 
-async fn update(mode: OutputMode, args: astraflow::cli::UpdateArgs) -> Result<i32> {
-    let url = args
-        .manifest_url
-        .unwrap_or_else(|| LATEST_RELEASE_URL.into());
+async fn maybe_prompt_for_update(command: &Option<CliCommand>, mode: OutputMode) -> Result<bool> {
+    if mode != OutputMode::Human
+        || !io::stdin().is_terminal()
+        || !io::stdout().is_terminal()
+        || env::var_os("ASTRAFLOW_NO_UPDATE_CHECK").is_some()
+        || matches!(command, Some(CliCommand::Update(_)))
+    {
+        return Ok(false);
+    }
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    let preferences = config::load_update_preferences()?;
+    if preferences
+        .last_checked_at
+        .is_some_and(|checked| now.saturating_sub(checked) < UPDATE_CHECK_INTERVAL)
+    {
+        return Ok(false);
+    }
+    let url = env::var("ASTRAFLOW_UPDATE_URL").unwrap_or_else(|_| LATEST_RELEASE_URL.to_owned());
+    let Ok(Ok(latest)) =
+        tokio::time::timeout(Duration::from_secs(3), latest_release_version(&url)).await
+    else {
+        return Ok(false);
+    };
+    let current = env!("CARGO_PKG_VERSION");
+    let available = semver::Version::parse(&latest)
+        .with_context(|| format!("invalid release version `{latest}`"))?
+        > semver::Version::parse(current).context("invalid current package version")?;
+    if !available || preferences.skipped_version.as_deref() == Some(latest.as_str()) {
+        config::record_update_check(&latest, false, now)?;
+        return Ok(false);
+    }
+
+    match update_prompt::prompt(current, &latest)? {
+        UpdateChoice::UpdateNow => {
+            install_release(&latest, mode).await?;
+            config::record_update_check(&latest, false, now)?;
+            println!("AstraFlow {latest} installed. Restart your command to use the new version.");
+            Ok(true)
+        }
+        UpdateChoice::RemindLater => {
+            config::record_update_check(&latest, false, now)?;
+            Ok(false)
+        }
+        UpdateChoice::SkipVersion => {
+            config::record_update_check(&latest, true, now)?;
+            Ok(false)
+        }
+    }
+}
+
+async fn latest_release_version(url: &str) -> Result<String> {
     let payload: Value = http_client()?
-        .get(&url)
+        .get(url)
         .send()
         .await?
         .error_for_status()?
         .json()
         .await?;
-    let latest = payload
+    payload
         .get("tag_name")
         .and_then(Value::as_str)
-        .map(|version| version.strip_prefix('v').unwrap_or(version))
-        .ok_or_else(|| anyhow!("update service returned no release version"))?;
+        .map(|version| version.strip_prefix('v').unwrap_or(version).to_owned())
+        .ok_or_else(|| anyhow!("update service returned no release version"))
+}
+
+async fn update(mode: OutputMode, args: astraflow::cli::UpdateArgs) -> Result<i32> {
+    let url = args
+        .manifest_url
+        .unwrap_or_else(|| LATEST_RELEASE_URL.into());
+    let latest = latest_release_version(&url).await?;
     let current = env!("CARGO_PKG_VERSION");
-    let available = semver::Version::parse(latest)
+    let available = semver::Version::parse(&latest)
         .with_context(|| format!("invalid release version `{latest}`"))?
         > semver::Version::parse(current).context("invalid current package version")?;
     if !args.check && available {
-        install_release(latest, mode).await?;
+        install_release(&latest, mode).await?;
     }
     mode.print(
         if available {
