@@ -32,7 +32,7 @@ By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTRAFLOW_VERSION=0.2.4 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
+  ASTRAFLOW_VERSION=0.2.5 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -97,7 +97,7 @@ astraflow codex --model gpt-5-mini -- --full-auto
 astraflow claude -- --permission-mode plan
 ```
 
-The wrapper's provider and model selection has higher precedence than existing user defaults. Codex receives per-invocation `-c` values; Claude receives explicit model and gateway variables; OpenCode receives its final in-memory config layer; DSH receives a final patch; Grok, Pi, and Prime receive a named `astraflow` provider plus explicit CLI selection; Hermes runs with an isolated per-launch provider config. API keys are passed through process environment only, never written into those harness config files.
+The wrapper's provider and model selection has higher precedence than existing user defaults. Codex receives per-invocation `-c` values; Claude ignores user/project/local settings for the wrapped session and receives explicit model and gateway variables; OpenCode receives its final in-memory config layer; DSH receives a final patch; Grok, Pi, and Prime receive a named `astraflow` provider plus explicit CLI selection; Hermes runs with an isolated per-launch provider config. API keys are passed through process environment only, never written into those harness config files.
 
 The adapters track the official configuration contracts for [Claude Code](https://code.claude.com/docs/en/llm-gateway), [Codex CLI](https://developers.openai.com/codex/config-reference/), [Grok Build](https://github.com/xai-org/grok-build), [OpenCode](https://opencode.ai/docs/providers/), [Hermes Agent](https://github.com/NousResearch/hermes-agent), [Pi](https://github.com/earendil-works/pi), [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness), and [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent).
 
@@ -161,7 +161,7 @@ docker build --target harness-all -t astraflow-harness-all .
 docker run --rm astraflow-harness-all
 ```
 
-Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks—including both legacy and current Pi authentication behavior—on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.4`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
+Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks—including both legacy/current Pi authentication and hostile Claude settings—on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.5`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
 
 ## 中文说明
 

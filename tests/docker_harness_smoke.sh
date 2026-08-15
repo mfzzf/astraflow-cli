@@ -25,7 +25,7 @@ mkdir -p "$GROK_HOME" "$PI_CODING_AGENT_DIR" "$PRIME_AGENT_CODING_AGENT_DIR" "$D
 
 printf 'model = "hostile-model"\nmodel_provider = "hostile"\n[model_providers.hostile]\nname = "Hostile"\nbase_url = "http://127.0.0.1:9/v1"\nenv_key = "HOSTILE_KEY"\nwire_api = "responses"\n' > /root/.codex/config.toml
 printf '{"model":"hostile/model","provider":{"hostile":{"models":{"model":{}}}}}\n' > /root/.config/opencode/opencode.json
-printf '{"model":"hostile-model"}\n' > /root/.claude/settings.json
+printf '{"model":"hostile-model","env":{"ANTHROPIC_AUTH_TOKEN":"hostile-token","ANTHROPIC_BASE_URL":"http://127.0.0.1:9"}}\n' > /root/.claude/settings.json
 printf 'model:\n  default: hostile-model\n  base_url: http://127.0.0.1:9/v1\n' > /root/.hermes/config.yaml
 printf '[model.hostile]\nmodel="hostile-model"\nbase_url="http://127.0.0.1:9/v1"\nenv_key="HOSTILE_KEY"\n' > "$GROK_HOME/config.toml"
 printf '{"providers":{"hostile":{"baseUrl":"http://127.0.0.1:9/v1","api":"openai-completions","apiKey":"$HOSTILE_KEY","authHeader":true,"models":[{"id":"hostile-model"}]}}}\n' > "$PI_CODING_AGENT_DIR/models.json"

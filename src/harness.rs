@@ -444,7 +444,12 @@ pub fn command_arguments(
             "-c".into(),
             "model_providers.modelverse.requires_openai_auth=false".into(),
         ],
-        Harness::Claude => vec!["--model".into(), model.into()],
+        Harness::Claude => vec![
+            "--setting-sources".into(),
+            String::new(),
+            "--model".into(),
+            model.into(),
+        ],
         Harness::Grok => vec!["--model".into(), "astraflow".into()],
         Harness::Opencode => Vec::new(),
         Harness::Hermes => vec![
@@ -661,6 +666,17 @@ mod tests {
         let env = environment(Harness::Claude, &cred.api_key, &cred.endpoint, &model);
         assert_eq!(env.values["ANTHROPIC_MODEL"], "claude-model");
         assert_eq!(env.values["CLAUDE_CODE_SUBAGENT_MODEL"], "claude-model");
+        let args = command_arguments(
+            Harness::Claude,
+            &cred.endpoint,
+            &model,
+            &["--print".into(), "hello".into()],
+            None,
+        );
+        assert_eq!(
+            &args[..4],
+            ["--setting-sources", "", "--model", "claude-model"]
+        );
     }
 
     #[test]

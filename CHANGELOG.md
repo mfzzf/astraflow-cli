@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5 — 2026-08-15
+
+- Prevented Claude Code user/project/local settings from overriding the AstraFlow endpoint, bearer token, or model for wrapped launches.
+- Added a real Claude Code regression with hostile `settings.json` endpoint and authentication values.
+
 ## 0.2.4 — 2026-08-15
 
 - Fixed Pi 0.73.x authentication by supporting its legacy environment-variable resolution alongside current Pi releases.
