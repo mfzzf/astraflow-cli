@@ -52,7 +52,7 @@ RUN mkdir -p /usr/local/lib/hermes-agent \
     && uv venv --python /usr/bin/python3.11 venv \
     && VIRTUAL_ENV=/usr/local/lib/hermes-agent/venv uv pip install -e . \
     && ln -sf /usr/local/lib/hermes-agent/venv/bin/hermes /usr/local/bin/hermes
-COPY --from=build /workspace/target/release/astf /usr/local/bin/astf
+COPY --from=build /workspace/target/release/astraflow /usr/local/bin/astraflow
 COPY tests/harness_mock.py tests/docker_harness_smoke.sh /opt/astraflow-tests/
 RUN chmod +x /opt/astraflow-tests/docker_harness_smoke.sh
 CMD ["/opt/astraflow-tests/docker_harness_smoke.sh"]
@@ -61,6 +61,6 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /workspace/target/release/astf /usr/local/bin/astf
-ENTRYPOINT ["astf"]
+COPY --from=build /workspace/target/release/astraflow /usr/local/bin/astraflow
+ENTRYPOINT ["astraflow"]
 CMD ["--help"]

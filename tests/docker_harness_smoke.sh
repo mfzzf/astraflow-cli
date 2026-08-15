@@ -38,7 +38,7 @@ run_case() {
   shift
   local before
   before=$(wc -l < "$mock_log")
-  if ! timeout 90 astf "$name" --model astraflow-test-model -- "$@" >/tmp/"$name".out 2>/tmp/"$name".err; then
+  if ! timeout 90 astraflow "$name" --model astraflow-test-model -- "$@" >/tmp/"$name".out 2>/tmp/"$name".err; then
     printf '%s failed\n' "$name" >&2
     sed -n '1,200p' /tmp/"$name".err >&2
     sed -n '1,80p' /tmp/"$name".out >&2

@@ -22,11 +22,11 @@ jobs:
           rustup toolchain install 1.88.0 --profile minimal
           rustup target add "$TARGET" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "$TARGET"
-          tar -czf "astf-${TARGET}.tar.gz" -C "target/${TARGET}/release" astf
+          tar -czf "astraflow-${TARGET}.tar.gz" -C "target/${TARGET}/release" astraflow
       - uses: actions/upload-artifact@v7
         with:
-          name: astf-linux-x64
-          path: astf-${{ env.TARGET }}.tar.gz
+          name: astraflow-linux-x64
+          path: astraflow-${{ env.TARGET }}.tar.gz
           if-no-files-found: error
 
   linux-arm64:
@@ -43,11 +43,11 @@ jobs:
           rustup toolchain install 1.88.0 --profile minimal
           rustup target add "$TARGET" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "$TARGET"
-          tar -czf "astf-${TARGET}.tar.gz" -C "target/${TARGET}/release" astf
+          tar -czf "astraflow-${TARGET}.tar.gz" -C "target/${TARGET}/release" astraflow
       - uses: actions/upload-artifact@v7
         with:
-          name: astf-linux-arm64
-          path: astf-${{ env.TARGET }}.tar.gz
+          name: astraflow-linux-arm64
+          path: astraflow-${{ env.TARGET }}.tar.gz
           if-no-files-found: error
 
   macos:
@@ -73,11 +73,11 @@ jobs:
           rustup toolchain install 1.88.0 --profile minimal
           rustup target add "${{ matrix.target }}" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "${{ matrix.target }}"
-          tar -czf "astf-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" astf
+          tar -czf "astraflow-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" astraflow
       - uses: actions/upload-artifact@v7
         with:
-          name: astf-macos-${{ matrix.arch }}
-          path: astf-${{ matrix.target }}.tar.gz
+          name: astraflow-macos-${{ matrix.arch }}
+          path: astraflow-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
   windows:
@@ -104,11 +104,11 @@ jobs:
           rustup toolchain install 1.88.0 --profile minimal
           rustup target add "${{ matrix.target }}" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "${{ matrix.target }}"
-          Compress-Archive -Path "target/${{ matrix.target }}/release/astf.exe" -DestinationPath "astf-${{ matrix.target }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/astraflow.exe" -DestinationPath "astraflow-${{ matrix.target }}.zip"
       - uses: actions/upload-artifact@v7
         with:
-          name: astf-windows-${{ matrix.arch }}
-          path: astf-${{ matrix.target }}.zip
+          name: astraflow-windows-${{ matrix.arch }}
+          path: astraflow-${{ matrix.target }}.zip
           if-no-files-found: error
 
   publish:
@@ -128,7 +128,7 @@ jobs:
           merge-multiple: true
       - name: Create checksums
         working-directory: dist
-        run: sha256sum astf-* > SHA256SUMS
+        run: sha256sum astraflow-* > SHA256SUMS
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

@@ -7,7 +7,7 @@ use std::net::TcpListener;
 use std::thread;
 
 fn cli() -> Command {
-    Command::cargo_bin("astf").unwrap()
+    Command::cargo_bin("astraflow").unwrap()
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn json_version_is_exactly_one_document() {
     let output = cli().args(["--json", "version"]).output().unwrap();
     assert!(output.status.success());
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["name"], "astf");
+    assert_eq!(value["name"], "astraflow");
     assert_eq!(
         output.stdout.iter().filter(|byte| **byte == b'\n').count(),
         1
@@ -156,7 +156,7 @@ fn completion_script_is_generated() {
         .args(["--completions", "zsh"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("_astf"));
+        .stdout(predicate::str::contains("_astraflow"));
 }
 
 #[test]

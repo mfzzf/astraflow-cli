@@ -72,7 +72,7 @@ impl ModelVerseRegion {
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "astf",
+    name = "astraflow",
     version,
     about = "The easiest way to use AstraFlow locally.",
     long_about = "AstraFlow signs you in, selects a ModelVerse API key, and launches local coding agents with the correct provider environment.",

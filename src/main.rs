@@ -358,7 +358,7 @@ fn auth(mode: OutputMode, cwd: &Path) -> Result<i32> {
         }
         None => {
             mode.print(
-                "Not authenticated. Run `astf login`.",
+                "Not authenticated. Run `astraflow login`.",
                 &json!({"ok": false, "authenticated": false}),
             )?;
             Ok(1)
@@ -528,7 +528,7 @@ async fn harness_command(mode: OutputMode, cwd: &Path, command: HarnessCommand) 
             Ok(0)
         }
         HarnessCommand::Test(args) => {
-            let credential = credential.ok_or_else(|| anyhow!("run `astf login` first"))?;
+            let credential = credential.ok_or_else(|| anyhow!("run `astraflow login` first"))?;
             harness_test(
                 mode,
                 credential,
@@ -727,7 +727,7 @@ async fn eval(mode: OutputMode, cwd: &Path, args: astraflow::cli::EvalArgs) -> R
     }
     let credential = config::resolve(cwd)?.map(|resolved| resolved.credential);
     if credential.is_none() && !args.allow_no_key {
-        bail!("no AstraFlow credential resolves; run `astf login`");
+        bail!("no AstraFlow credential resolves; run `astraflow login`");
     }
     let bun = which::which("bun").context("bun is required to run eval files")?;
     let mut command = Command::new(bun);
@@ -867,9 +867,9 @@ async fn install_release(version: &str, mode: OutputMode) -> Result<()> {
     file.flush()?;
 
     let install_dir = env::current_exe()
-        .context("locate the running astf executable")?
+        .context("locate the running astraflow executable")?
         .parent()
-        .ok_or_else(|| anyhow!("the running astf executable has no parent directory"))?
+        .ok_or_else(|| anyhow!("the running astraflow executable has no parent directory"))?
         .to_owned();
     let mut command = if cfg!(windows) {
         let mut command = Command::new("powershell.exe");
@@ -880,8 +880,8 @@ async fn install_release(version: &str, mode: OutputMode) -> Result<()> {
     };
     command
         .arg(file.path())
-        .env("ASTF_VERSION", version)
-        .env("ASTF_INSTALL_DIR", install_dir)
+        .env("ASTRAFLOW_VERSION", version)
+        .env("ASTRAFLOW_INSTALL_DIR", install_dir)
         .stdin(Stdio::inherit())
         .stdout(if mode == OutputMode::Json {
             Stdio::null()
@@ -899,14 +899,14 @@ async fn install_release(version: &str, mode: OutputMode) -> Result<()> {
 fn version(mode: OutputMode) -> Result<i32> {
     mode.print(
         format!(
-            "astf {} ({}-{})",
+            "astraflow {} ({}-{})",
             env!("CARGO_PKG_VERSION"),
             env::consts::OS,
             env::consts::ARCH
         ),
         &json!({
             "ok": true,
-            "name": "astf",
+            "name": "astraflow",
             "version": env!("CARGO_PKG_VERSION"),
             "target": format!("{}-{}", env::consts::OS, env::consts::ARCH)
         }),
@@ -935,25 +935,25 @@ fn print_completions(shell: CompletionShell) {
         CompletionShell::Bash => generate(
             clap_complete::shells::Bash,
             &mut command,
-            "astf",
+            "astraflow",
             &mut io::stdout(),
         ),
         CompletionShell::Zsh => generate(
             clap_complete::shells::Zsh,
             &mut command,
-            "astf",
+            "astraflow",
             &mut io::stdout(),
         ),
         CompletionShell::Fish => generate(
             clap_complete::shells::Fish,
             &mut command,
-            "astf",
+            "astraflow",
             &mut io::stdout(),
         ),
         CompletionShell::Sh => generate(
             clap_complete::shells::Bash,
             &mut command,
-            "astf",
+            "astraflow",
             &mut io::stdout(),
         ),
     }
@@ -962,7 +962,7 @@ fn print_completions(shell: CompletionShell) {
 fn require_credential(cwd: &Path) -> Result<Credential> {
     config::resolve(cwd)?
         .map(|resolved| resolved.credential)
-        .ok_or_else(|| anyhow!("no AstraFlow credential resolves; run `astf login`"))
+        .ok_or_else(|| anyhow!("no AstraFlow credential resolves; run `astraflow login`"))
 }
 
 fn http_client() -> Result<reqwest::Client> {

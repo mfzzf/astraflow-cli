@@ -2,7 +2,7 @@
 
 ## 0.2.3 — 2026-08-15
 
-- Renamed the Rust package from `astraflow-cli` to `astraflow` while keeping the executable name `astf`.
+- Renamed both the Rust package and executable from `astraflow-cli`/`astf` to `astraflow`.
 - Replaced the nonexistent crates.io update endpoint with the `mfzzf/astraflow-cli` GitHub Releases API.
 - Made self-update install checksummed GitHub Release binaries through the cross-platform installers.
 

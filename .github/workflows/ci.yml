@@ -33,11 +33,11 @@ jobs:
           set -eu
           fixture=$(mktemp -d)
           target=x86_64-unknown-linux-gnu
-          cp target/debug/astf "$fixture/astf"
-          tar -czf "$fixture/astf-${target}.tar.gz" -C "$fixture" astf
-          (cd "$fixture" && sha256sum "astf-${target}.tar.gz" > SHA256SUMS)
-          ASTF_RELEASE_BASE_URL="file://$fixture" ASTF_INSTALL_DIR="$fixture/bin" ./install.sh
-          "$fixture/bin/astf" --json version
+          cp target/debug/astraflow "$fixture/astraflow"
+          tar -czf "$fixture/astraflow-${target}.tar.gz" -C "$fixture" astraflow
+          (cd "$fixture" && sha256sum "astraflow-${target}.tar.gz" > SHA256SUMS)
+          ASTRAFLOW_RELEASE_BASE_URL="file://$fixture" ASTRAFLOW_INSTALL_DIR="$fixture/bin" ./install.sh
+          "$fixture/bin/astraflow" --json version
 
   harness-routing:
     name: Eight real CLI routing checks (self-hosted)

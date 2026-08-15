@@ -93,7 +93,7 @@ pub async fn refresh(client: &Client, tokens: &OAuthTokens) -> Result<OAuthToken
     let refresh_token = tokens
         .refresh_token
         .as_ref()
-        .ok_or_else(|| anyhow!("the OAuth session cannot be refreshed; run `astf login`"))?;
+        .ok_or_else(|| anyhow!("the OAuth session cannot be refreshed; run `astraflow login`"))?;
     use secrecy::ExposeSecret;
     let token_url = format!("{}/token", oauth_base_url(tokens.provider));
     let id = client_id();

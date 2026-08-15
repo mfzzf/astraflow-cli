@@ -362,7 +362,7 @@ fn ensure_safe_file(path: &Path) -> Result<()> {
         }
         if metadata.mode() & 0o077 != 0 {
             bail!(
-                "credential file permissions are too broad: {}; run `astf workspace --repair`",
+                "credential file permissions are too broad: {}; run `astraflow workspace --repair`",
                 path.display()
             );
         }

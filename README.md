@@ -1,6 +1,6 @@
 # AstraFlow CLI
 
-`astf` is a Rust CLI that signs a user into UCloud, selects an AstraFlow ModelVerse API key and region, and launches local coding agents with an explicit AstraFlow endpoint, credential, provider, and compatible model.
+`astraflow` is a Rust CLI that signs a user into UCloud, selects an AstraFlow ModelVerse API key and region, and launches local coding agents with an explicit AstraFlow endpoint, credential, provider, and compatible model.
 
 ```text
 login → default UCloud project → choose/create ModelVerse API key → ready
@@ -20,7 +20,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.ps1 | iex
 ```
 
-The installers detect the operating system and CPU architecture, download the matching GitHub Release asset, verify it against `SHA256SUMS`, and install `astf`. Supported release targets are:
+The installers detect the operating system and CPU architecture, download the matching GitHub Release asset, verify it against `SHA256SUMS`, and install `astraflow`. Supported release targets are:
 
 | Operating system | Architectures |
 | --- | --- |
@@ -28,11 +28,11 @@ The installers detect the operating system and CPU architecture, download the ma
 | macOS | Intel x86_64, Apple Silicon |
 | Windows | x86_64, ARM64 |
 
-By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/.local/bin`. Windows installs to `%LOCALAPPDATA%\Programs\astf\bin` and updates the user `PATH`. To select a version or directory:
+By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/.local/bin`. Windows installs to `%LOCALAPPDATA%\Programs\astraflow\bin` and updates the user `PATH`. To select a version or directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTF_VERSION=0.2.3 ASTF_INSTALL_DIR="$HOME/bin" sh
+  ASTRAFLOW_VERSION=0.2.3 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -41,15 +41,15 @@ For a source install, Rust 1.88 or newer is required:
 cargo install --git https://github.com/mfzzf/astraflow-cli --locked
 ```
 
-The Rust package is named `astraflow`; the installed command is `astf`. `astf update`
+The Rust package is named `astraflow`; the installed command is `astraflow`. `astraflow update`
 checks `mfzzf/astraflow-cli` GitHub Releases and installs the checksummed release binary,
 so it does not require a crates.io package.
 
 Then choose a region, sign in, and launch an agent:
 
 ```bash
-astf login --region singapore
-astf codex
+astraflow login --region singapore
+astraflow codex
 ```
 
 The first interactive login asks for English or Chinese and one of four ModelVerse access regions. It opens UCloud OAuth in the browser, resolves the account's default project, lists enabled UMInfer keys, and asks which key to use. If no key exists, it creates one named `AstraFlow Agent`. `--lang en|zh` overrides and saves the language.
@@ -61,9 +61,9 @@ The first interactive login asks for English or Chinese and one of four ModelVer
 | `los-angeles` | `https://api-us-ca.umodelverse.ai` |
 | `frankfurt` | `https://api-ge-fra.umodelverse.ai` |
 
-Login reads the selected region's `/v1/models` endpoint to learn which model IDs the key can use. OAuth login may correlate those IDs with names and aliases from the read-only `ListUFSquareModel` catalog, but it never reads model-detail protocol metadata. `astf` classifies protocols locally: Claude IDs use the Anthropic Messages API, OpenAI GPT/o-series/Codex IDs can use Responses, and other conversational text models use Chat Completions. Dedicated image/video/audio generation, embedding, rerank, OCR, batch, transcription, and moderation models are excluded; vision-language chat models remain available.
+Login reads the selected region's `/v1/models` endpoint to learn which model IDs the key can use. OAuth login may correlate those IDs with names and aliases from the read-only `ListUFSquareModel` catalog, but it never reads model-detail protocol metadata. `astraflow` classifies protocols locally: Claude IDs use the Anthropic Messages API, OpenAI GPT/o-series/Codex IDs can use Responses, and other conversational text models use Chat Completions. Dedicated image/video/audio generation, embedding, rerank, OCR, batch, transcription, and moderation models are excluded; vision-language chat models remain available.
 
-Within each protocol, the default is the eligible model with the newest `created` timestamp returned by the authenticated `/v1/models` response. Run `astf login` again to refresh saved defaults after new models are published; wrapper-level `--model` always remains the explicit override.
+Within each protocol, the default is the eligible model with the newest `created` timestamp returned by the authenticated `/v1/models` response. Run `astraflow login` again to refresh saved defaults after new models are published; wrapper-level `--model` always remains the explicit override.
 
 ModelVerse documents its Claude-compatible endpoint as `POST /v1/messages` and limits that endpoint to Claude-series models, matching the [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages/create). Every `claude-*` model family—including current Sonnet, Opus, Haiku, and Fable IDs—is therefore selected only for the Claude launcher and never assigned to an OpenAI-compatible harness.
 
@@ -72,13 +72,13 @@ See the [ModelVerse quick start](https://astraflow.ucloud.cn/docs/modelverse/qui
 For SSH, keep the command running and use:
 
 ```bash
-astf login --no-open
+astraflow login --no-open
 ```
 
 Open the printed URL on any device, then paste the final `http://localhost:…/authorization?...` URL into the prompt. A supplied key can be imported non-interactively:
 
 ```bash
-printf '%s' "$ASTRAFLOW_API_KEY" | astf login --with-key
+printf '%s' "$ASTRAFLOW_API_KEY" | astraflow login --with-key
 ```
 
 ## Commands
@@ -93,8 +93,8 @@ The surface follows Ori's local-harness workflow:
 Use the wrapper-level `--model` to force a model. Arguments after `--` pass through unchanged:
 
 ```bash
-astf codex --model gpt-5-mini -- --full-auto
-astf claude -- --permission-mode plan
+astraflow codex --model gpt-5-mini -- --full-auto
+astraflow claude -- --permission-mode plan
 ```
 
 The wrapper's provider and model selection has higher precedence than existing user defaults. Codex receives per-invocation `-c` values; Claude receives explicit model and gateway variables; OpenCode receives its final in-memory config layer; DSH receives a final patch; Grok, Pi, and Prime receive a named `astraflow` provider plus explicit CLI selection; Hermes runs with an isolated per-launch provider config. API keys are passed through process environment only, never written into those harness config files.
@@ -112,7 +112,7 @@ Resolution order is:
 3. nearest parent `.astraflow/credentials.json`
 4. the OS-specific global AstraFlow configuration directory
 
-Credential directories are mode `0700` and files are mode `0600` on Unix. Symlinked or group/world-readable credential files are rejected; `astf workspace --repair` restores permissions.
+Credential directories are mode `0700` and files are mode `0600` on Unix. Symlinked or group/world-readable credential files are rejected; `astraflow workspace --repair` restores permissions.
 
 The UCloud control-plane client intentionally exposes only:
 
@@ -127,7 +127,7 @@ There is no delete/update/resource-management operation. Public/private UCloud k
 `vault-tunnel` binds only to loopback, accepts only `/v1` routes, gives the child an ephemeral local token, and injects the real ModelVerse key only into upstream requests:
 
 ```bash
-astf vault-tunnel --exec codex
+astraflow vault-tunnel --exec codex
 ```
 
 ## Injection verification
@@ -135,14 +135,14 @@ astf vault-tunnel --exec codex
 Local executable/configuration check (no model request):
 
 ```bash
-astf harness test codex
+astraflow harness test codex
 ```
 
 Run the real harness with one minimal prompt, then optionally perform the request-log detail check:
 
 ```bash
 UCLOUD_PUBLIC_KEY=… UCLOUD_PRIVATE_KEY=… \
-  astf harness test codex --live --verify-usage --model <text-model>
+  astraflow harness test codex --live --verify-usage --model <text-model>
 ```
 
 The live prompt asks for exactly `ASTRAFLOW_OK`. Usage verification uses one separate 12-token Chat Completions probe to obtain a request ID, then retries the read-only log lookup at most three times because ingestion may be slightly delayed.
@@ -165,9 +165,9 @@ Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI ro
 
 ## 中文说明
 
-`astf login` 会先选择中英文和中国大陆、新加坡、洛杉矶、法兰克福四个接入地域之一，然后通过浏览器完成 UCloud OAuth 登录，自动获取默认项目，列出可用的 ModelVerse API Key，并让用户选择。若项目中没有 Key，只会创建一个名为 `AstraFlow Agent` 的 UMInfer Key，不会执行其他资源操作。
+`astraflow login` 会先选择中英文和中国大陆、新加坡、洛杉矶、法兰克福四个接入地域之一，然后通过浏览器完成 UCloud OAuth 登录，自动获取默认项目，列出可用的 ModelVerse API Key，并让用户选择。若项目中没有 Key，只会创建一个名为 `AstraFlow Agent` 的 UMInfer Key，不会执行其他资源操作。
 
-登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，并在本地按模型 ID、模型广场名称和别名判断协议，不再调用模型详情接口。Claude 系列固定使用 Anthropic Messages API；GPT、o-series 和 Codex 系列可供 Responses 使用；其余对话文本模型使用 Chat Completions。图片、视频、音频生成、Embedding、Rerank、OCR 和 Batch 模型会被排除。每种协议默认选择认证模型列表中 `created` 时间戳最新的可用模型；重新执行 `astf login` 即可刷新。启动时 `astf` 会显式覆盖旧的 endpoint、key、provider 和 model 配置。
+登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，并在本地按模型 ID、模型广场名称和别名判断协议，不再调用模型详情接口。Claude 系列固定使用 Anthropic Messages API；GPT、o-series 和 Codex 系列可供 Responses 使用；其余对话文本模型使用 Chat Completions。图片、视频、音频生成、Embedding、Rerank、OCR 和 Batch 模型会被排除。每种协议默认选择认证模型列表中 `created` 时间戳最新的可用模型；重新执行 `astraflow login` 即可刷新。启动时 `astraflow` 会显式覆盖旧的 endpoint、key、provider 和 model 配置。
 
 Linux / macOS 一键安装：
 
@@ -178,11 +178,11 @@ curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh
 常用命令：
 
 ```bash
-astf --lang zh login --region china
-astf auth
-astf codex
-astf claude
-astf harness-doctor
+astraflow --lang zh login --region china
+astraflow auth
+astraflow codex
+astraflow claude
+astraflow harness-doctor
 ```
 
 开发和测试均可在 Docker 中完成：`docker compose run --rm dev`。
