@@ -310,7 +310,7 @@ pub struct UpdateArgs {
     #[arg(long)]
     pub check: bool,
 
-    /// Override the release-manifest URL
+    /// Override the GitHub-compatible release-manifest URL
     #[arg(long, env = "ASTRAFLOW_UPDATE_URL")]
     pub manifest_url: Option<String>,
 }

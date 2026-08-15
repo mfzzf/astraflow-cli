@@ -1,13 +1,13 @@
 use anyhow::{Context, Result, anyhow, bail};
-use astraflow_cli::cli::{
+use astraflow::cli::{
     Cli, Command as CliCommand, CompletionShell, HarnessCommand, HarnessLaunchArgs, Language,
     ModelVerseRegion,
 };
-use astraflow_cli::config::{self, Credential, OAuthProvider, ResolvedCredential};
-use astraflow_cli::harness::{self, Harness};
-use astraflow_cli::i18n::{BANNER, Messages};
-use astraflow_cli::output::OutputMode;
-use astraflow_cli::{modelverse, oauth, proxy, ucloud};
+use astraflow::config::{self, Credential, OAuthProvider, ResolvedCredential};
+use astraflow::harness::{self, Harness};
+use astraflow::i18n::{BANNER, Messages};
+use astraflow::output::OutputMode;
+use astraflow::{modelverse, oauth, proxy, ucloud};
 use clap::{CommandFactory, Parser, error::ErrorKind};
 use clap_complete::generate;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
@@ -16,7 +16,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde_json::{Value, json};
 use std::env;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -127,7 +127,7 @@ async fn run(cli: Cli, mode: OutputMode) -> Result<i32> {
 }
 
 async fn login(
-    args: astraflow_cli::cli::LoginArgs,
+    args: astraflow::cli::LoginArgs,
     mode: OutputMode,
     messages: Messages,
     cwd: &Path,
@@ -702,7 +702,7 @@ async fn probe(live: bool, model: Option<&str>) -> Result<i32> {
     Ok(0)
 }
 
-async fn eval(mode: OutputMode, cwd: &Path, args: astraflow_cli::cli::EvalArgs) -> Result<i32> {
+async fn eval(mode: OutputMode, cwd: &Path, args: astraflow::cli::EvalArgs) -> Result<i32> {
     let roots = if args.paths.is_empty() {
         vec![cwd.to_path_buf()]
     } else {
@@ -802,10 +802,16 @@ fn changelog(mode: OutputMode, query: Option<&str>) -> Result<i32> {
     Ok(0)
 }
 
-async fn update(mode: OutputMode, args: astraflow_cli::cli::UpdateArgs) -> Result<i32> {
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/mfzzf/astraflow-cli/releases/latest";
+const INSTALL_SH_URL: &str =
+    "https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh";
+const INSTALL_PS1_URL: &str =
+    "https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.ps1";
+
+async fn update(mode: OutputMode, args: astraflow::cli::UpdateArgs) -> Result<i32> {
     let url = args
         .manifest_url
-        .unwrap_or_else(|| "https://crates.io/api/v1/crates/astraflow-cli".into());
+        .unwrap_or_else(|| LATEST_RELEASE_URL.into());
     let payload: Value = http_client()?
         .get(&url)
         .send()
@@ -814,37 +820,80 @@ async fn update(mode: OutputMode, args: astraflow_cli::cli::UpdateArgs) -> Resul
         .json()
         .await?;
     let latest = payload
-        .pointer("/crate/max_stable_version")
-        .or_else(|| payload.get("version"))
+        .get("tag_name")
         .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("update service returned no version"))?;
+        .map(|version| version.strip_prefix('v').unwrap_or(version))
+        .ok_or_else(|| anyhow!("update service returned no release version"))?;
     let current = env!("CARGO_PKG_VERSION");
-    let available = latest != current;
+    let available = semver::Version::parse(latest)
+        .with_context(|| format!("invalid release version `{latest}`"))?
+        > semver::Version::parse(current).context("invalid current package version")?;
     if !args.check && available {
-        let cargo = which::which("cargo").context("cargo is required for self-update")?;
-        let status = Command::new(cargo)
-            .args([
-                "install",
-                "astraflow-cli",
-                "--version",
-                latest,
-                "--force",
-                "--locked",
-            ])
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .await?;
-        if !status.success() {
-            return Ok(status.code().unwrap_or(1));
-        }
+        install_release(latest, mode).await?;
     }
     mode.print(
-        if available { format!("AstraFlow {latest} is available.") } else { format!("AstraFlow {current} is current.") },
-        &json!({"ok": true, "current": current, "latest": latest, "update_available": available, "installed": !args.check && available}),
+        if available {
+            format!("AstraFlow {latest} is available.")
+        } else {
+            format!("AstraFlow {current} is current.")
+        },
+        &json!({
+            "ok": true,
+            "current": current,
+            "latest": latest,
+            "update_available": available,
+            "installed": !args.check && available,
+            "source": url,
+        }),
     )?;
     Ok(0)
+}
+
+async fn install_release(version: &str, mode: OutputMode) -> Result<()> {
+    let script_url = if cfg!(windows) {
+        INSTALL_PS1_URL
+    } else {
+        INSTALL_SH_URL
+    };
+    let script = http_client()?
+        .get(script_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+    let mut file = tempfile::NamedTempFile::new().context("create temporary installer")?;
+    file.write_all(&script)?;
+    file.flush()?;
+
+    let install_dir = env::current_exe()
+        .context("locate the running astf executable")?
+        .parent()
+        .ok_or_else(|| anyhow!("the running astf executable has no parent directory"))?
+        .to_owned();
+    let mut command = if cfg!(windows) {
+        let mut command = Command::new("powershell.exe");
+        command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]);
+        command
+    } else {
+        Command::new("sh")
+    };
+    command
+        .arg(file.path())
+        .env("ASTF_VERSION", version)
+        .env("ASTF_INSTALL_DIR", install_dir)
+        .stdin(Stdio::inherit())
+        .stdout(if mode == OutputMode::Json {
+            Stdio::null()
+        } else {
+            Stdio::inherit()
+        })
+        .stderr(Stdio::inherit());
+    let status = command.status().await.context("run release installer")?;
+    if !status.success() {
+        bail!("release installer exited with status {status}");
+    }
+    Ok(())
 }
 
 fn version(mode: OutputMode) -> Result<i32> {
@@ -920,18 +969,18 @@ fn http_client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(45))
-        .user_agent(concat!("astraflow-cli/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("astraflow/", env!("CARGO_PKG_VERSION")))
         .build()?)
 }
 
-fn init_tracing(level: astraflow_cli::cli::LogLevel) {
+fn init_tracing(level: astraflow::cli::LogLevel) {
     let filter = match level {
-        astraflow_cli::cli::LogLevel::All | astraflow_cli::cli::LogLevel::Trace => "trace",
-        astraflow_cli::cli::LogLevel::Debug => "debug",
-        astraflow_cli::cli::LogLevel::Info => "info",
-        astraflow_cli::cli::LogLevel::Warn | astraflow_cli::cli::LogLevel::Warning => "warn",
-        astraflow_cli::cli::LogLevel::Error | astraflow_cli::cli::LogLevel::Fatal => "error",
-        astraflow_cli::cli::LogLevel::None => "off",
+        astraflow::cli::LogLevel::All | astraflow::cli::LogLevel::Trace => "trace",
+        astraflow::cli::LogLevel::Debug => "debug",
+        astraflow::cli::LogLevel::Info => "info",
+        astraflow::cli::LogLevel::Warn | astraflow::cli::LogLevel::Warning => "warn",
+        astraflow::cli::LogLevel::Error | astraflow::cli::LogLevel::Fatal => "error",
+        astraflow::cli::LogLevel::None => "off",
     };
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)

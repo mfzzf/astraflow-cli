@@ -32,7 +32,7 @@ By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTF_VERSION=0.2.2 ASTF_INSTALL_DIR="$HOME/bin" sh
+  ASTF_VERSION=0.2.3 ASTF_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -40,6 +40,10 @@ For a source install, Rust 1.88 or newer is required:
 ```bash
 cargo install --git https://github.com/mfzzf/astraflow-cli --locked
 ```
+
+The Rust package is named `astraflow`; the installed command is `astf`. `astf update`
+checks `mfzzf/astraflow-cli` GitHub Releases and installs the checksummed release binary,
+so it does not require a crates.io package.
 
 Then choose a region, sign in, and launch an agent:
 
@@ -157,7 +161,7 @@ docker build --target harness-all -t astraflow-harness-all .
 docker run --rm astraflow-harness-all
 ```
 
-Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.2`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
+Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.3`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
 
 ## 中文说明
 

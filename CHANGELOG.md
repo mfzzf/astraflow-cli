@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 — 2026-08-15
+
+- Renamed the Rust package from `astraflow-cli` to `astraflow` while keeping the executable name `astf`.
+- Replaced the nonexistent crates.io update endpoint with the `mfzzf/astraflow-cli` GitHub Releases API.
+- Made self-update install checksummed GitHub Release binaries through the cross-platform installers.
+
 ## 0.2.2 — 2026-08-15
 
 - Select the newest eligible Chat Completions, Responses, and Anthropic model from the authenticated `/v1/models` `created` timestamps.

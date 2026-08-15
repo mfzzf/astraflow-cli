@@ -158,3 +158,37 @@ fn completion_script_is_generated() {
         .success()
         .stdout(predicate::str::contains("_astf"));
 }
+
+#[test]
+fn update_check_reads_a_github_release_manifest() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4096];
+        let size = stream.read(&mut request).unwrap();
+        let request = String::from_utf8_lossy(&request[..size]);
+        assert!(request.starts_with("GET /release/latest "));
+        let body = r#"{"tag_name":"v9.8.7"}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(), body
+        )
+        .unwrap();
+    });
+    let output = cli()
+        .env(
+            "ASTRAFLOW_UPDATE_URL",
+            format!("http://{address}/release/latest"),
+        )
+        .args(["--json", "update", "--check"])
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    assert!(output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["latest"], "9.8.7");
+    assert_eq!(value["update_available"], true);
+    assert_eq!(value["installed"], false);
+}
