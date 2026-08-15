@@ -5,6 +5,7 @@
 - Added an AstraFlow-managed DSH Web profile: `astraflow dsh --model <model> --profile web` now starts the browser UI while preserving the injected ModelVerse endpoint, key, model, and protected patch layer.
 - Kept `headless` as the default DSH profile and continued rejecting custom profiles and user-supplied patches that could replace AstraFlow routing.
 - Restored the persistent self-hosted runner's workspace ownership after containerized Linux release builds.
+- Made a value-less `--model` open a searchable interactive model selector with live ModelVerse pricing; explicit IDs such as `glm-5.2` and `deepseek-v4-pro-0813` remain supported.
 
 ## 0.2.7 — 2026-08-15
 

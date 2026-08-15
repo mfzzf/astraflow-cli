@@ -43,6 +43,20 @@ fn dsh_help_exposes_managed_profiles() {
 }
 
 #[test]
+fn model_without_value_enters_selector_instead_of_failing_clap_parsing() {
+    cli()
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("ASTRAFLOW_API_KEY", "offline-test-key")
+        .args(["grok", "--model"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "--model without a value requires an interactive terminal",
+        ));
+}
+
+#[test]
 fn json_version_is_exactly_one_document() {
     let output = cli().args(["--json", "version"]).output().unwrap();
     assert!(output.status.success());

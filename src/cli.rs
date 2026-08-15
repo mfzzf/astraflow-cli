@@ -2,6 +2,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub const SELECT_MODEL_INTERACTIVELY: &str = "__astraflow_select_model_interactively__";
+
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -93,6 +95,7 @@ impl ModelVerseRegion {
     version,
     about = "The easiest way to use AstraFlow locally.",
     long_about = "AstraFlow signs you in, selects a ModelVerse API key, and launches local coding agents with the correct provider environment.",
+    after_help = "Examples:\n  astraflow grok --model glm-5.2\n  astraflow opencode --model deepseek-v4-pro-0813\n  astraflow pi --model\n  astraflow dsh --model deepseek-v4-pro-0813 --profile web",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -241,8 +244,13 @@ pub struct HarnessLaunchArgs {
     #[arg(long)]
     pub binary: Option<PathBuf>,
 
-    /// Override the AstraFlow-selected model for this launch
-    #[arg(long)]
+    /// Select a model interactively, or provide a model ID directly
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = SELECT_MODEL_INTERACTIVELY,
+        value_name = "MODEL"
+    )]
     pub model: Option<String>,
 
     /// Arguments passed through to the harness
@@ -256,8 +264,13 @@ pub struct DshLaunchArgs {
     #[arg(long)]
     pub binary: Option<PathBuf>,
 
-    /// Override the AstraFlow-selected model for this launch
-    #[arg(long)]
+    /// Select a model interactively, or provide a model ID directly
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = SELECT_MODEL_INTERACTIVELY,
+        value_name = "MODEL"
+    )]
     pub model: Option<String>,
 
     /// Start a headless task or the browser UI

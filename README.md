@@ -90,10 +90,13 @@ The surface follows Ori's local-harness workflow:
 - `harness-doctor`, `harness list|inspect|test`, `workspace`, `vault-tunnel`, `eval`
 - global `--json`/`--agent`, `--human`/`--tty`, `--wizard`, `--lang`, `--log-level`, and `--completions`
 
-Use the wrapper-level `--model` to force a model. Ordinary arguments after `--` pass through to the harness:
+Use `--model <MODEL>` to specify an ID directly, or pass `--model` without a value to search the current Key's live model list, compare input/cache/output prices, and choose interactively. Ordinary arguments after `--` pass through to the harness:
 
 ```bash
 astraflow codex --model gpt-5-mini -- --full-auto
+astraflow grok --model glm-5.2
+astraflow opencode --model deepseek-v4-pro-0813
+astraflow pi --model
 astraflow claude -- --permission-mode plan
 ```
 
@@ -195,6 +198,10 @@ astraflow --lang zh login --region china
 astraflow auth
 astraflow codex
 astraflow claude
+astraflow grok --model glm-5.2
+astraflow opencode --model deepseek-v4-pro-0813
+astraflow pi --model  # 搜索模型、查看价格并交互选择
+astraflow dsh --model deepseek-v4-pro-0813 --profile web
 astraflow harness-doctor
 ```
 

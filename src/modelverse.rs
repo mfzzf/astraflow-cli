@@ -1,4 +1,5 @@
 use crate::config::ModelSelection;
+use crate::harness::Harness;
 use crate::ucloud::SquareModel;
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::Client;
@@ -11,6 +12,15 @@ use std::collections::HashSet;
 pub struct AvailableModel {
     pub id: String,
     pub created: u64,
+    pub pricing: Vec<ModelRate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelRate {
+    pub charge_item: String,
+    pub price: String,
+    pub currency: String,
+    pub unit: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +60,7 @@ pub async fn list_models(
             looks_like_text_model(&id).then_some(AvailableModel {
                 id,
                 created: entry.get("created").and_then(Value::as_u64).unwrap_or(0),
+                pricing: parse_pricing(entry),
             })
         })
         .collect();
@@ -80,6 +91,83 @@ pub async fn choose_text_model(
 
 pub fn model_ids(available: &[AvailableModel]) -> Vec<String> {
     available.iter().map(|model| model.id.clone()).collect()
+}
+
+pub fn compatible_models(available: &[AvailableModel], harness: Harness) -> Vec<AvailableModel> {
+    available
+        .iter()
+        .filter(|model| match harness {
+            Harness::Claude => looks_like_anthropic_model(&model.id),
+            Harness::Codex => looks_like_responses_model(&model.id),
+            _ => !looks_like_anthropic_model(&model.id),
+        })
+        .cloned()
+        .collect()
+}
+
+pub fn price_summary(model: &AvailableModel) -> String {
+    if model.pricing.is_empty() {
+        return "price unavailable".to_owned();
+    }
+    model
+        .pricing
+        .iter()
+        .map(|rate| {
+            let item = match rate.charge_item.as_str() {
+                "input" => "input",
+                "cache" => "cache",
+                item if item.contains("output") => "output",
+                item => item,
+            };
+            let currency = if rate.currency.eq_ignore_ascii_case("CNY") {
+                "¥"
+            } else {
+                rate.currency.as_str()
+            };
+            format!("{item} {currency}{}/{}", rate.price, rate.unit)
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn parse_pricing(entry: &Value) -> Vec<ModelRate> {
+    entry
+        .get("pricing")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|condition| {
+            condition
+                .get("Rates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(|rate| {
+            let charge_item = rate.get("ChargeItem")?.as_str()?.to_owned();
+            let price = rate.get("Price").map(|value| match value {
+                Value::String(value) => value.clone(),
+                value => value.to_string(),
+            })?;
+            let currency = rate
+                .get("Currency")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let unit = rate
+                .get("UnitEn")
+                .or_else(|| rate.get("Unit"))
+                .and_then(Value::as_str)
+                .unwrap_or("unit")
+                .to_owned();
+            Some(ModelRate {
+                charge_item,
+                price,
+                currency,
+                unit,
+            })
+        })
+        .collect()
 }
 
 pub fn select_models(available: &[AvailableModel], catalog: &[SquareModel]) -> ModelSelection {
@@ -282,8 +370,51 @@ mod tests {
             .map(|(id, created)| AvailableModel {
                 id: (*id).to_owned(),
                 created: *created,
+                pricing: Vec::new(),
             })
             .collect()
+    }
+
+    #[test]
+    fn pricing_is_rendered_from_the_model_list_payload() {
+        let value = json!({
+            "pricing": [{
+                "Rates": [
+                    {"ChargeItem":"input","Price":3,"Currency":"CNY","UnitEn":"Million Tokens"},
+                    {"ChargeItem":"output_text_tokens","Price":6,"Currency":"CNY","UnitEn":"Million Tokens"}
+                ]
+            }]
+        });
+        let model = AvailableModel {
+            id: "deepseek-v4-pro-0813".to_owned(),
+            created: 1,
+            pricing: parse_pricing(&value),
+        };
+        assert_eq!(
+            price_summary(&model),
+            "input ¥3/Million Tokens · output ¥6/Million Tokens"
+        );
+    }
+
+    #[test]
+    fn interactive_inventory_is_filtered_for_each_harness_protocol() {
+        let models = inventory(&[
+            ("claude-opus-5", 3),
+            ("gpt-5.6-luna", 2),
+            ("deepseek-v4-pro-0813", 1),
+        ]);
+        assert_eq!(
+            model_ids(&compatible_models(&models, Harness::Claude)),
+            ["claude-opus-5"]
+        );
+        assert_eq!(
+            model_ids(&compatible_models(&models, Harness::Codex)),
+            ["gpt-5.6-luna"]
+        );
+        assert_eq!(
+            model_ids(&compatible_models(&models, Harness::Grok)),
+            ["gpt-5.6-luna", "deepseek-v4-pro-0813"]
+        );
     }
 
     #[test]
@@ -433,11 +564,13 @@ mod tests {
             vec![
                 AvailableModel {
                     id: "claude-opus-5".to_owned(),
-                    created: 200
+                    created: 200,
+                    pricing: Vec::new()
                 },
                 AvailableModel {
                     id: "deepseek-ai/DeepSeek-V3.2".to_owned(),
-                    created: 100
+                    created: 100,
+                    pricing: Vec::new()
                 }
             ]
         );

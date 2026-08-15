@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use astraflow::cli::{
     Cli, Command as CliCommand, CompletionShell, DshLaunchArgs, HarnessCommand, HarnessLaunchArgs,
-    Language, ModelVerseRegion,
+    Language, ModelVerseRegion, SELECT_MODEL_INTERACTIVELY,
 };
 use astraflow::config::{self, Credential, OAuthProvider, ResolvedCredential};
 use astraflow::harness::{self, Harness};
@@ -106,14 +106,14 @@ async fn run(cli: Cli, mode: OutputMode) -> Result<i32> {
         CliCommand::Help { command } => print_help(command.as_deref(), mode).map(|_| 0),
         CliCommand::Login(args) => login(args, mode, messages, &cwd).await.map(|_| 0),
         CliCommand::Auth => auth(mode, &cwd),
-        CliCommand::Claude(args) => launch(Harness::Claude, args, &cwd).await,
-        CliCommand::Codex(args) => launch(Harness::Codex, args, &cwd).await,
-        CliCommand::Grok(args) => launch(Harness::Grok, args, &cwd).await,
-        CliCommand::Opencode(args) => launch(Harness::Opencode, args, &cwd).await,
-        CliCommand::Hermes(args) => launch(Harness::Hermes, args, &cwd).await,
-        CliCommand::Pi(args) => launch(Harness::Pi, args, &cwd).await,
-        CliCommand::Dsh(args) => launch_dsh(args, &cwd).await,
-        CliCommand::PrimeAgent(args) => launch(Harness::PrimeAgent, args, &cwd).await,
+        CliCommand::Claude(args) => launch(Harness::Claude, args, mode, &cwd).await,
+        CliCommand::Codex(args) => launch(Harness::Codex, args, mode, &cwd).await,
+        CliCommand::Grok(args) => launch(Harness::Grok, args, mode, &cwd).await,
+        CliCommand::Opencode(args) => launch(Harness::Opencode, args, mode, &cwd).await,
+        CliCommand::Hermes(args) => launch(Harness::Hermes, args, mode, &cwd).await,
+        CliCommand::Pi(args) => launch(Harness::Pi, args, mode, &cwd).await,
+        CliCommand::Dsh(args) => launch_dsh(args, mode, &cwd).await,
+        CliCommand::PrimeAgent(args) => launch(Harness::PrimeAgent, args, mode, &cwd).await,
         CliCommand::HarnessDoctor => harness_doctor(mode, &cwd),
         CliCommand::Workspace(args) => workspace(mode, &cwd, args.repair),
         CliCommand::VaultTunnel(args) => vault_tunnel(mode, &cwd, args.listen, args.exec).await,
@@ -366,21 +366,28 @@ fn auth(mode: OutputMode, cwd: &Path) -> Result<i32> {
     }
 }
 
-async fn launch(harness: Harness, args: HarnessLaunchArgs, cwd: &Path) -> Result<i32> {
+async fn launch(
+    harness: Harness,
+    args: HarnessLaunchArgs,
+    mode: OutputMode,
+    cwd: &Path,
+) -> Result<i32> {
     let credential = require_credential(cwd)?;
+    let model = resolve_launch_model(harness, &credential, args.model, mode).await?;
     let status = harness::launch(
         harness,
         &credential,
         args.binary.as_deref(),
         &args.args,
-        args.model.as_deref(),
+        model.as_deref(),
     )
     .await?;
     Ok(status.code().unwrap_or(1))
 }
 
-async fn launch_dsh(args: DshLaunchArgs, cwd: &Path) -> Result<i32> {
+async fn launch_dsh(args: DshLaunchArgs, mode: OutputMode, cwd: &Path) -> Result<i32> {
     let credential = require_credential(cwd)?;
+    let model = resolve_launch_model(Harness::Dsh, &credential, args.model, mode).await?;
     let mut passthrough = vec!["--profile".to_owned(), args.profile.as_str().to_owned()];
     passthrough.extend(args.args);
     let status = harness::launch(
@@ -388,10 +395,57 @@ async fn launch_dsh(args: DshLaunchArgs, cwd: &Path) -> Result<i32> {
         &credential,
         args.binary.as_deref(),
         &passthrough,
-        args.model.as_deref(),
+        model.as_deref(),
     )
     .await?;
     Ok(status.code().unwrap_or(1))
+}
+
+async fn resolve_launch_model(
+    harness: Harness,
+    credential: &Credential,
+    requested: Option<String>,
+    mode: OutputMode,
+) -> Result<Option<String>> {
+    if requested.as_deref() != Some(SELECT_MODEL_INTERACTIVELY) {
+        return Ok(requested);
+    }
+    if mode == OutputMode::Json || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        bail!(
+            "--model without a value requires an interactive terminal; use `--model <MODEL>` in scripts"
+        );
+    }
+    let client = http_client()?;
+    let available = modelverse::list_models(&client, &credential.endpoint, &credential.api_key)
+        .await
+        .context("unable to load models for interactive selection")?;
+    let compatible = modelverse::compatible_models(&available, harness);
+    if compatible.is_empty() {
+        bail!("no compatible model is available for {}", harness.name());
+    }
+    let query = Input::<String>::with_theme(&ColorfulTheme::default())
+        .with_prompt("Search models / 搜索模型（留空显示全部）")
+        .allow_empty(true)
+        .interact_text()?;
+    let query = query.trim().to_ascii_lowercase();
+    let mut filtered: Vec<_> = compatible
+        .iter()
+        .filter(|model| query.is_empty() || model.id.to_ascii_lowercase().contains(&query))
+        .collect();
+    if filtered.is_empty() {
+        bail!("no model matches `{query}`");
+    }
+    filtered.sort_by_key(|model| !model.id.eq_ignore_ascii_case(&query));
+    let choices: Vec<_> = filtered
+        .iter()
+        .map(|model| format!("{}  —  {}", model.id, modelverse::price_summary(model)))
+        .collect();
+    let selected = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Model / 模型")
+        .items(&choices)
+        .default(0)
+        .interact()?;
+    Ok(Some(filtered[selected].id.clone()))
 }
 
 fn harness_doctor(mode: OutputMode, cwd: &Path) -> Result<i32> {
