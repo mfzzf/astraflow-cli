@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x64:
+    name: Linux x64 (self-hosted)
+    runs-on: [self-hosted, linux, x64, rust, astraflow-cli]
+    timeout-minutes: 30
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup target add "$TARGET" --toolchain 1.88.0
+          cargo +1.88.0 build --release --locked --target "$TARGET"
+          tar -czf "astf-${TARGET}.tar.gz" -C "target/${TARGET}/release" astf
+      - uses: actions/upload-artifact@v5
+        with:
+          name: astf-linux-x64
+          path: astf-${{ env.TARGET }}.tar.gz
+          if-no-files-found: error
+
+  linux-arm64:
+    name: Linux arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      TARGET: aarch64-unknown-linux-gnu
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup target add "$TARGET" --toolchain 1.88.0
+          cargo +1.88.0 build --release --locked --target "$TARGET"
+          tar -czf "astf-${TARGET}.tar.gz" -C "target/${TARGET}/release" astf
+      - uses: actions/upload-artifact@v5
+        with:
+          name: astf-linux-arm64
+          path: astf-${{ env.TARGET }}.tar.gz
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - arch: arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup target add "${{ matrix.target }}" --toolchain 1.88.0
+          cargo +1.88.0 build --release --locked --target "${{ matrix.target }}"
+          tar -czf "astf-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" astf
+      - uses: actions/upload-artifact@v5
+        with:
+          name: astf-macos-${{ matrix.arch }}
+          path: astf-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup target add "${{ matrix.target }}" --toolchain 1.88.0
+          cargo +1.88.0 build --release --locked --target "${{ matrix.target }}"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/astf.exe" -DestinationPath "astf-${{ matrix.target }}.zip"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: astf-windows-${{ matrix.arch }}
+          path: astf-${{ matrix.target }}.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: [linux-x64, linux-arm64, macos, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate tag
+        run: |
+          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+          test "v${version}" = "$GITHUB_REF_NAME"
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum astf-* > SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "AstraFlow CLI $GITHUB_REF_NAME"

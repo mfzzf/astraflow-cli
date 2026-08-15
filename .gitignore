@@ -1,0 +1,4 @@
+/target
+/.astraflow
+/.env
+*.log

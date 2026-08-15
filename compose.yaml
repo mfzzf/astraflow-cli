@@ -1,0 +1,17 @@
+services:
+  dev:
+    build:
+      context: .
+      target: development
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - cargo-target:/workspace/target
+    command: cargo test --all-targets --locked
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  cargo-target:

@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust checks (self-hosted)
+    runs-on: [self-hosted, linux, x64, rust, astraflow-cli]
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select Rust 1.88
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
+          rustup default 1.88.0
+      - run: cargo fmt --all -- --check
+      - run: cargo test --all-targets --locked
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test Unix installer
+        run: |
+          set -eu
+          fixture=$(mktemp -d)
+          target=x86_64-unknown-linux-gnu
+          cp target/debug/astf "$fixture/astf"
+          tar -czf "$fixture/astf-${target}.tar.gz" -C "$fixture" astf
+          (cd "$fixture" && sha256sum "astf-${target}.tar.gz" > SHA256SUMS)
+          ASTF_RELEASE_BASE_URL="file://$fixture" ASTF_INSTALL_DIR="$fixture/bin" ./install.sh
+          "$fixture/bin/astf" --json version
