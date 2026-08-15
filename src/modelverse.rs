@@ -6,7 +6,7 @@ use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 pub const PREFERRED_CHAT_MODEL: &str = "deepseek-v4-flash-0731";
 
@@ -117,6 +117,65 @@ pub fn price_summary(model: &AvailableModel) -> String {
                 rate.currency.as_str()
             };
             format!("{item} {currency}{}/{}", rate.price, rate.unit)
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+pub fn compact_price_summary(model: &AvailableModel) -> String {
+    if model.pricing.is_empty() {
+        return "Price unavailable".to_owned();
+    }
+    let mut groups: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
+    for rate in &model.pricing {
+        let Some(item) = normalized_text_charge_item(&rate.charge_item) else {
+            continue;
+        };
+        let currency = if rate.currency.eq_ignore_ascii_case("CNY") {
+            "¥"
+        } else {
+            rate.currency.as_str()
+        };
+        let unit = if rate
+            .unit
+            .to_ascii_lowercase()
+            .replace(' ', "")
+            .contains("milliontokens")
+        {
+            "1M".to_owned()
+        } else {
+            rate.unit.clone()
+        };
+        let value = (format!("{currency}{}", rate.price), unit);
+        let values = groups.entry(item).or_default();
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    [("input", "in"), ("cache", "cache"), ("output", "out")]
+        .into_iter()
+        .filter_map(|(key, label)| {
+            groups.get(key).map(|values| {
+                let shared_unit = values
+                    .first()
+                    .map(|(_, unit)| unit)
+                    .filter(|unit| values.iter().all(|(_, candidate)| candidate == *unit));
+                let rates = values
+                    .iter()
+                    .map(|(value, unit)| {
+                        if shared_unit.is_some() {
+                            value.clone()
+                        } else {
+                            format!("{value}/{unit}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("–");
+                match shared_unit {
+                    Some(unit) => format!("{label} {rates}/{unit}"),
+                    None => format!("{label} {rates}"),
+                }
+            })
         })
         .collect::<Vec<_>>()
         .join(" · ")
@@ -391,6 +450,29 @@ mod tests {
             pricing: parse_pricing(&value),
         };
         assert_eq!(price_summary(&model), "input ¥1/Million Tokens");
+    }
+
+    #[test]
+    fn picker_pricing_compacts_repeated_cache_tiers() {
+        let value = json!({
+            "pricing": [{
+                "Rates": [
+                    {"ChargeItem":"input","Price":36,"Currency":"CNY","UnitEn":"Million Tokens"},
+                    {"ChargeItem":"cache_read","Price":3.6,"Currency":"CNY","UnitEn":"Million Tokens"},
+                    {"ChargeItem":"cache_write","Price":45,"Currency":"CNY","UnitEn":"Million Tokens"},
+                    {"ChargeItem":"output","Price":180,"Currency":"CNY","UnitEn":"Million Tokens"}
+                ]
+            }]
+        });
+        let model = AvailableModel {
+            id: "claude-opus-5".to_owned(),
+            created: 1,
+            pricing: parse_pricing(&value),
+        };
+        assert_eq!(
+            compact_price_summary(&model),
+            "in ¥36/1M · cache ¥3.6–¥45/1M · out ¥180/1M"
+        );
     }
 
     #[test]

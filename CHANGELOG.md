@@ -2,6 +2,7 @@
 
 ## 0.2.9 — 2026-08-15
 
+- Rebuilt the interactive model picker with Ratatui and Crossterm, adding a responsive bordered layout, role tabs, a search panel, a scrollable highlighted model table, compact token prices, selected-model details, and automatic terminal restoration.
 - Removed harness-specific model-family filtering: Claude Code, Codex, and every other agent now share the complete conversational text model inventory returned by authenticated `/v1/models`.
 - Treat every listed conversational text model as compatible with Chat Completions, Responses, and Anthropic Messages until maintained protocol capability metadata is available.
 - Prefer `deepseek-v4-flash-0731` as the default for every protocol and fall back to the shared chat default when an older saved credential has no protocol-specific selection.

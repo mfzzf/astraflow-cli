@@ -90,7 +90,7 @@ The surface follows Ori's local-harness workflow:
 - `harness-doctor`, `harness list|inspect|test`, `workspace`, `vault-tunnel`, `eval`
 - global `--json`/`--agent`, `--human`/`--tty`, `--wizard`, `--lang`, `--log-level`, and `--completions`
 
-In an interactive terminal every harness command opens the live model picker even when `--model` is omitted. It supports direct typing to search, Up/Down to select, Tab/Shift+Tab or Left/Right to switch model roles, `D` to save the complete AstraFlow default combination, Enter to launch, and Esc to cancel. Pi and Prime also use Space to toggle multiple models in their Ctrl+P cycle pool. Prices come from the current Key's authenticated `/v1/models` response; image/video/audio charges are hidden from this text-agent picker.
+In an interactive terminal every harness command opens a cross-platform Ratatui model picker even when `--model` is omitted. Its bordered, responsive interface includes role tabs, direct search, a scrollable highlighted model table, compact token-price summaries, and full pricing details for the selected model. Up/Down selects, Tab/Shift+Tab or Left/Right switches model roles, `D` saves the complete AstraFlow default combination, Enter launches, and Esc cancels. Pi and Prime also use Space to toggle multiple models in their Ctrl+P cycle pool. Prices come from the current Key's authenticated `/v1/models` response; image/video/audio charges are hidden from this text-agent picker.
 
 Use `--model <MODEL>` to bypass the picker and specify the primary model directly. A value-less `--model` explicitly requests the picker and therefore fails in a non-interactive script instead of guessing. Ordinary arguments after `--` pass through to the harness:
 
@@ -198,6 +198,8 @@ Pushes to `main` run formatting, tests, Clippy, and hostile-config routing check
 `astraflow login` 会先选择中英文和中国大陆、新加坡、洛杉矶、法兰克福四个接入地域之一，然后通过浏览器完成 UCloud OAuth 登录，自动获取默认项目，列出可用的 ModelVerse API Key，并让用户选择。若项目中没有 Key，只会创建一个名为 `AstraFlow Agent` 的 UMInfer Key，不会执行其他资源操作。
 
 登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，不再调用模型详情接口。在后续接入可维护的协议能力数据之前，所有对话文本模型都会同时出现在 Claude Code、Codex 和其他 agent 的模型选择器中，不再按 Claude、GPT、o-series 或 Codex 名称过滤。图片、视频、音频生成、Embedding、Rerank、OCR 和 Batch 模型仍会被排除，视觉语言对话模型保留。所有协议都优先使用 `deepseek-v4-flash-0731`，否则选择认证模型列表中最新的可用文本模型；重新执行 `astraflow login` 即可刷新。
+
+交互式模型选择器使用 Ratatui 和 Crossterm 构建，提供角色标签页、即时搜索、可滚动高亮模型表格、紧凑价格摘要和当前模型完整价格；在 Linux、macOS 与 Windows 终端中使用同一套键盘操作和自动终端恢复逻辑。
 
 启动 harness 时，`astraflow` 会隔离用户、项目和本地配置，并显式固定 endpoint、key、provider 和 model。`--` 后仍可传递普通参数，但会拒绝能够覆盖路由的内部 model/provider/config/profile/patch/plugin/extension 参数；请使用外层 `astraflow <harness> --model ...` 选择模型。DSH 例外允许由 AstraFlow 管理的 `--profile web` 和 `--profile headless`，但仍禁止自定义 profile 与 patch 覆盖。
 

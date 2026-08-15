@@ -424,7 +424,7 @@ async fn resolve_launch_models(
     }
     let explicitly_requested = requested.as_deref() == Some(SELECT_MODEL_INTERACTIVELY);
     let interactive =
-        mode == OutputMode::Human && io::stdin().is_terminal() && io::stderr().is_terminal();
+        mode == OutputMode::Human && io::stdin().is_terminal() && io::stdout().is_terminal();
     if !interactive {
         if explicitly_requested {
             bail!(

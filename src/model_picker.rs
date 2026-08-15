@@ -1,6 +1,13 @@
 use crate::config::HarnessModelSettings;
-use crate::modelverse::{AvailableModel, price_summary};
-use console::{Key, Term, style};
+use crate::modelverse::{AvailableModel, compact_price_summary, price_summary};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs, Wrap},
+};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,6 +23,21 @@ pub enum PickerAction {
     Save(HarnessModelSettings),
     Submit(HarnessModelSettings),
     Cancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PickerKey {
+    Tab,
+    BackTab,
+    Left,
+    Right,
+    Up,
+    Down,
+    Enter,
+    Escape,
+    Backspace,
+    CtrlC,
+    Char(char),
 }
 
 #[derive(Debug)]
@@ -76,23 +98,23 @@ impl ModelPicker {
         }
     }
 
-    pub fn apply(&mut self, key: Key) -> PickerAction {
+    fn apply(&mut self, key: PickerKey) -> PickerAction {
         match key {
-            Key::Tab | Key::ArrowRight => self.change_slot(1),
-            Key::BackTab | Key::ArrowLeft => self.change_slot(-1),
-            Key::ArrowUp => self.change_model(-1),
-            Key::ArrowDown => self.change_model(1),
-            Key::Char(' ') if self.current_slot().multiple => self.toggle_current_model(),
-            Key::Enter => return PickerAction::Submit(self.selected.clone()),
-            Key::Escape if !self.query.is_empty() => self.query.clear(),
-            Key::Escape | Key::CtrlC => return PickerAction::Cancel,
-            Key::Char('D') => return PickerAction::Save(self.selected.clone()),
-            Key::Char('/') => self.query.clear(),
-            Key::Backspace => {
+            PickerKey::Tab | PickerKey::Right => self.change_slot(1),
+            PickerKey::BackTab | PickerKey::Left => self.change_slot(-1),
+            PickerKey::Up => self.change_model(-1),
+            PickerKey::Down => self.change_model(1),
+            PickerKey::Char(' ') if self.current_slot().multiple => self.toggle_current_model(),
+            PickerKey::Enter => return PickerAction::Submit(self.selected.clone()),
+            PickerKey::Escape if !self.query.is_empty() => self.query.clear(),
+            PickerKey::Escape | PickerKey::CtrlC => return PickerAction::Cancel,
+            PickerKey::Char('D') => return PickerAction::Save(self.selected.clone()),
+            PickerKey::Char('/') => self.query.clear(),
+            PickerKey::Backspace => {
                 self.query.pop();
                 self.ensure_visible_selection();
             }
-            Key::Char(character) if !character.is_control() && !character.is_whitespace() => {
+            PickerKey::Char(character) if !character.is_control() && !character.is_whitespace() => {
                 self.query.push(character.to_ascii_lowercase());
                 self.ensure_visible_selection();
             }
@@ -105,35 +127,32 @@ impl ModelPicker {
     where
         F: FnMut(HarnessModelSettings) -> anyhow::Result<()>,
     {
-        let term = Term::stderr();
-        let mut rendered_lines = 0;
-        let mut notice = String::new();
-        loop {
-            if rendered_lines > 0 {
-                term.clear_last_lines(rendered_lines)?;
-            }
-            let lines = self.render(&notice, term.size().1 as usize);
-            rendered_lines = lines.len();
-            for line in lines {
-                term.write_line(&line)?;
-            }
-            notice.clear();
-            match self.apply(term.read_key()?) {
-                PickerAction::Continue => {}
-                PickerAction::Save(models) => {
-                    save(models)?;
-                    notice = "✓ 已保存为 AstraFlow 默认组合 / Saved as AstraFlow defaults".into();
+        ratatui::run(|terminal| {
+            let mut notice = String::new();
+            loop {
+                terminal.draw(|frame| self.render(frame, &notice))?;
+                notice.clear();
+                let Event::Key(event) = event::read()? else {
+                    continue;
+                };
+                if event.kind == KeyEventKind::Release {
+                    continue;
                 }
-                PickerAction::Submit(models) => {
-                    term.clear_last_lines(rendered_lines)?;
-                    return Ok(models);
-                }
-                PickerAction::Cancel => {
-                    term.clear_last_lines(rendered_lines)?;
-                    anyhow::bail!("model selection cancelled");
+                let Some(key) = picker_key(event) else {
+                    continue;
+                };
+                match self.apply(key) {
+                    PickerAction::Continue => {}
+                    PickerAction::Save(models) => {
+                        save(models)?;
+                        notice =
+                            "✓ 已保存为 AstraFlow 默认组合 / Saved as AstraFlow defaults".into();
+                    }
+                    PickerAction::Submit(models) => return Ok(models),
+                    PickerAction::Cancel => anyhow::bail!("model selection cancelled"),
                 }
             }
-        }
+        })
     }
 
     fn change_slot(&mut self, delta: isize) {
@@ -233,41 +252,124 @@ impl ModelPicker {
             .expect("every model slot has a cursor")
     }
 
-    fn render(&self, notice: &str, width: usize) -> Vec<String> {
-        let width = width.max(60);
-        let tabs = self
+    fn render(&self, frame: &mut Frame<'_>, notice: &str) {
+        let area = frame.area();
+        let outer = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(Line::from(vec![
+                Span::styled(
+                    " AstraFlow ",
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " Model Picker / 模型选择 ",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        let inner = outer.inner(area);
+        frame.render_widget(outer, area);
+        if inner.width < 30 || inner.height < 12 {
+            frame.render_widget(
+                Paragraph::new(
+                    "Terminal is too small / 终端窗口太小\nPlease resize to at least 30 × 12",
+                )
+                .style(Style::default().fg(Color::Yellow))
+                .block(
+                    Block::new()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded),
+                ),
+                inner,
+            );
+            return;
+        }
+
+        let [tabs_area, search_area, models_area, detail_area, help_area] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(4),
+            Constraint::Length(3),
+        ])
+        .areas(inner);
+
+        let tab_titles = self
             .slots
             .iter()
-            .enumerate()
-            .map(|(index, slot)| {
-                if index == self.active {
-                    style(format!("[{}]", slot.label)).cyan().bold().to_string()
-                } else {
-                    format!(" {} ", slot.label)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("  ");
-        let mut lines = vec![
-            style("AstraFlow Model Picker / 模型选择")
-                .bold()
-                .to_string(),
-            tabs,
-            format!(
-                "Search / 搜索: {}",
-                if self.query.is_empty() {
-                    "(type to search)"
-                } else {
-                    &self.query
-                }
+            .map(|slot| Line::from(format!(" {} ", slot.label)))
+            .collect::<Vec<_>>();
+        let tabs = Tabs::new(tab_titles)
+            .select(self.active)
+            .block(
+                Block::new()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(" Roles / 模型角色 "),
+            )
+            .style(Style::default().fg(Color::DarkGray))
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .divider(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+        frame.render_widget(tabs, tabs_area);
+
+        let search = if self.query.is_empty() {
+            Line::from(vec![
+                Span::styled("› ", Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    "直接输入模型名称 / Type to search",
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled("› ", Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    self.query.as_str(),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("█", Style::default().fg(Color::Cyan)),
+            ])
+        };
+        frame.render_widget(
+            Paragraph::new(search).block(
+                Block::new()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(" Search / 搜索 "),
             ),
-        ];
+            search_area,
+        );
+
         let matches = self.matches();
+        let title = format!(
+            " Models / 模型  {} of {} ",
+            matches.len(),
+            self.models.len()
+        );
         if matches.is_empty() {
-            lines.push(
-                style("  No matching model / 没有匹配模型")
-                    .yellow()
-                    .to_string(),
+            frame.render_widget(
+                Paragraph::new("\n  No matching model / 没有匹配模型")
+                    .style(Style::default().fg(Color::Yellow))
+                    .block(
+                        Block::new()
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded)
+                            .title(title),
+                    ),
+                models_area,
             );
         } else {
             let selected_position = matches
@@ -278,63 +380,134 @@ impl ModelPicker {
                         .eq_ignore_ascii_case(self.current_cursor())
                 })
                 .unwrap_or(0);
-            let max_rows = 10;
-            let start = selected_position.saturating_sub(max_rows / 2);
-            for index in matches.iter().skip(start).take(max_rows) {
+            let rows = matches.iter().map(|index| {
                 let model = &self.models[*index];
-                let marker = if model.id.eq_ignore_ascii_case(self.current_cursor()) {
-                    ">"
-                } else {
-                    " "
-                };
-                let checked = if self.current_slot().multiple {
+                let marker = if self.current_slot().multiple {
                     if self
                         .selected
                         .cycle
                         .iter()
                         .any(|id| id.eq_ignore_ascii_case(&model.id))
                     {
-                        "[x] "
+                        "● "
                     } else {
-                        "[ ] "
+                        "○ "
                     }
                 } else {
                     ""
                 };
-                let line = format!(
-                    "{marker} {checked}{}  —  {}",
-                    model.id,
-                    price_summary(model)
-                );
-                lines.push(truncate_line(&line, width));
-            }
-            if matches.len() > max_rows {
-                lines.push(format!("  … {} models / 个模型", matches.len()));
-            }
+                Row::new([
+                    Cell::from(format!("{marker}{}", model.id)),
+                    Cell::from(compact_price_summary(model)),
+                ])
+            });
+            let header = Row::new(["MODEL", "TOKEN PRICE"])
+                .style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .bottom_margin(1);
+            let table = Table::new(
+                rows,
+                [Constraint::Percentage(46), Constraint::Percentage(54)],
+            )
+            .header(header)
+            .block(
+                Block::new()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(title),
+            )
+            .column_spacing(2)
+            .row_highlight_style(
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▶ ");
+            let mut state = TableState::default().with_selected(Some(selected_position));
+            frame.render_stateful_widget(table, models_area, &mut state);
         }
-        lines.push(
-            "Tab/Shift+Tab or ←/→ slot · ↑/↓ model · Space toggle pool · type search · D save defaults · Enter launch · Esc cancel"
-                .into(),
+
+        let detail = self
+            .models
+            .iter()
+            .find(|model| model.id.eq_ignore_ascii_case(self.current_cursor()))
+            .map(price_summary)
+            .unwrap_or_else(|| "Price unavailable".to_owned());
+        frame.render_widget(
+            Paragraph::new(detail)
+                .style(Style::default().fg(Color::Gray))
+                .wrap(Wrap { trim: true })
+                .block(
+                    Block::new()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(Color::DarkGray))
+                        .title(" Selected price / 当前模型价格 "),
+                ),
+            detail_area,
         );
-        lines.push(if notice.is_empty() {
-            " ".into()
-        } else {
-            notice.into()
-        });
-        lines
+
+        let mut help = vec![Line::from(vec![
+            key("Tab / ←→"),
+            Span::raw(" role  "),
+            key("↑↓"),
+            Span::raw(" model  "),
+            key("Space"),
+            Span::raw(" pool  "),
+            key("D"),
+            Span::raw(" default  "),
+            key("Enter"),
+            Span::raw(" launch  "),
+            key("Esc"),
+            Span::raw(" cancel"),
+        ])];
+        if !notice.is_empty() {
+            help.push(Line::from(Span::styled(
+                notice,
+                Style::default().fg(Color::Green),
+            )));
+        }
+        frame.render_widget(
+            Paragraph::new(help).block(
+                Block::new()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(Color::DarkGray)),
+            ),
+            help_area,
+        );
     }
 }
 
-fn truncate_line(value: &str, width: usize) -> String {
-    let count = value.chars().count();
-    if count <= width {
-        return value.to_owned();
+fn picker_key(event: KeyEvent) -> Option<PickerKey> {
+    if event.modifiers.contains(KeyModifiers::CONTROL) && event.code == KeyCode::Char('c') {
+        return Some(PickerKey::CtrlC);
     }
-    value
-        .chars()
-        .take(width.saturating_sub(1))
-        .collect::<String>()
-        + "…"
+    Some(match event.code {
+        KeyCode::Tab => PickerKey::Tab,
+        KeyCode::BackTab => PickerKey::BackTab,
+        KeyCode::Left => PickerKey::Left,
+        KeyCode::Right => PickerKey::Right,
+        KeyCode::Up => PickerKey::Up,
+        KeyCode::Down => PickerKey::Down,
+        KeyCode::Enter => PickerKey::Enter,
+        KeyCode::Esc => PickerKey::Escape,
+        KeyCode::Backspace => PickerKey::Backspace,
+        KeyCode::Char(character) => PickerKey::Char(character),
+        _ => return None,
+    })
+}
+
+fn key(label: &'static str) -> Span<'static> {
+    Span::styled(
+        label,
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )
 }
 
 #[cfg(test)]
@@ -367,10 +540,10 @@ mod tests {
             ],
             HarnessModelSettings::default(),
         );
-        picker.apply(Key::ArrowDown);
-        picker.apply(Key::Tab);
+        picker.apply(PickerKey::Down);
+        picker.apply(PickerKey::Tab);
         assert!(
-            matches!(picker.apply(Key::Enter), PickerAction::Submit(models) if models.slots["default"] == "glm-5.2" && models.slots["small"] == "deepseek-v4-flash-0731")
+            matches!(picker.apply(PickerKey::Enter), PickerAction::Submit(models) if models.slots["default"] == "glm-5.2" && models.slots["small"] == "deepseek-v4-flash-0731")
         );
     }
 
@@ -389,11 +562,11 @@ mod tests {
             }],
             HarnessModelSettings::default(),
         );
-        for key in "glm-5.2".chars().map(Key::Char) {
+        for key in "glm-5.2".chars().map(PickerKey::Char) {
             picker.apply(key);
         }
         assert!(
-            matches!(picker.apply(Key::Char('D')), PickerAction::Save(models) if models.slots["default"] == "glm-5.2")
+            matches!(picker.apply(PickerKey::Char('D')), PickerAction::Save(models) if models.slots["default"] == "glm-5.2")
         );
     }
 
@@ -408,11 +581,45 @@ mod tests {
             }],
             HarnessModelSettings::default(),
         );
-        picker.apply(Key::Char(' '));
-        picker.apply(Key::ArrowDown);
-        picker.apply(Key::Char(' '));
+        picker.apply(PickerKey::Char(' '));
+        picker.apply(PickerKey::Down);
+        picker.apply(PickerKey::Char(' '));
         assert!(
-            matches!(picker.apply(Key::Enter), PickerAction::Submit(models) if models.cycle == ["deepseek-v4-flash-0731", "glm-5.2"])
+            matches!(picker.apply(PickerKey::Enter), PickerAction::Submit(models) if models.cycle == ["deepseek-v4-flash-0731", "glm-5.2"])
         );
+    }
+
+    #[test]
+    fn ratatui_layout_renders_search_models_prices_and_help() {
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let picker = ModelPicker::new(
+            vec![model("deepseek-v4-flash-0731"), model("glm-5.2")],
+            vec![ModelSlot {
+                key: "default",
+                label: "Default",
+                multiple: false,
+            }],
+            HarnessModelSettings::default(),
+        );
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| picker.render(frame, "Saved as AstraFlow defaults"))
+            .unwrap();
+        let rendered = terminal.backend().to_string();
+        for expected in [
+            "AstraFlow",
+            "Model Picker",
+            "Search",
+            "deepseek-v4-flash-0731",
+            "TOKEN PRICE",
+            "Saved as AstraFlow defaults",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing {expected}:\n{rendered}"
+            );
+        }
     }
 }
