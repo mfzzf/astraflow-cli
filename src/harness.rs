@@ -410,7 +410,37 @@ fn validate_passthrough_args(harness: Harness, args: &[String]) -> Result<()> {
             .first()
             .is_some_and(|arg| matches!(arg.as_str(), "web" | "plugin"))
     {
-        bail!("DSH web and plugin modes are disabled for AstraFlow-managed routing");
+        bail!(
+            "DSH positional web and plugin modes are not accepted; start the managed Web UI with `astraflow dsh --profile web`"
+        );
+    }
+    if harness == Harness::Dsh {
+        let mut profiles = 0;
+        let mut index = 0;
+        while index < args.len() {
+            let arg = &args[index];
+            let profile = if arg == "--profile" {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| anyhow!("dsh argument `--profile` requires web or headless"))?;
+                index += 1;
+                Some(value.as_str())
+            } else {
+                arg.strip_prefix("--profile=")
+            };
+            if let Some(profile) = profile {
+                profiles += 1;
+                if profiles > 1 {
+                    bail!("dsh argument `--profile` may only be specified once");
+                }
+                if !matches!(profile, "web" | "headless") {
+                    bail!(
+                        "dsh profile `{profile}` is not supported; use `--profile web` or `--profile headless`"
+                    );
+                }
+            }
+            index += 1;
+        }
     }
     let conflicts = match harness {
         Harness::Codex => [
@@ -424,13 +454,7 @@ fn validate_passthrough_args(harness: Harness, args: &[String]) -> Result<()> {
         .as_slice(),
         Harness::Grok => ["-m", "--model"].as_slice(),
         Harness::Hermes => ["--profile", "-p", "--provider", "--model", "-m"].as_slice(),
-        Harness::Dsh => [
-            "--patch",
-            "--profile",
-            "--dump-config",
-            "--dump-default-config",
-        ]
-        .as_slice(),
+        Harness::Dsh => ["--patch", "--dump-config", "--dump-default-config"].as_slice(),
         Harness::Pi | Harness::PrimeAgent => {
             ["--provider", "--model", "--api-key", "-e", "--extension"].as_slice()
         }
@@ -672,16 +696,37 @@ pub fn command_arguments(
         ],
         Harness::Dsh => patch_path
             .map(|path| {
-                vec![
+                let mut profile = "headless";
+                let mut passthrough = Vec::new();
+                let mut index = 0;
+                while index < args.len() {
+                    if args[index] == "--profile" {
+                        profile = args[index + 1].as_str();
+                        index += 2;
+                        continue;
+                    }
+                    if let Some(value) = args[index].strip_prefix("--profile=") {
+                        profile = value;
+                        index += 1;
+                        continue;
+                    }
+                    passthrough.push(args[index].clone());
+                    index += 1;
+                }
+                let mut configured = vec![
                     "--profile".into(),
-                    "headless".into(),
+                    profile.into(),
                     "--patch".into(),
                     path.display().to_string(),
-                ]
+                ];
+                configured.extend(passthrough);
+                configured
             })
             .unwrap_or_default(),
     };
-    configured.extend_from_slice(args);
+    if harness != Harness::Dsh {
+        configured.extend_from_slice(args);
+    }
     configured
 }
 
@@ -1054,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn dsh_uses_managed_headless_patch_and_rejects_user_layers() {
+    fn dsh_uses_managed_profiles_and_rejects_user_layers() {
         let patch = dsh_patch("https://api.modelverse.cn", "chat-model").unwrap();
         let content = fs::read_to_string(patch.path()).unwrap();
         assert!(content.contains("- id: settings\n  disabled: true"));
@@ -1066,6 +1111,26 @@ mod tests {
             Some(patch.path()),
         );
         assert_eq!(&args[..3], ["--profile", "headless", "--patch"]);
+        let web_args = command_arguments(
+            Harness::Dsh,
+            "https://api.modelverse.cn",
+            "chat-model",
+            &["--profile".into(), "web".into()],
+            Some(patch.path()),
+        );
+        assert_eq!(&web_args[..3], ["--profile", "web", "--patch"]);
+        assert!(validate_passthrough_args(Harness::Dsh, &["--profile=web".into()]).is_ok());
+        assert!(
+            validate_passthrough_args(
+                Harness::Dsh,
+                &["--profile".into(), "headless".into(), "run tests".into()]
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_passthrough_args(Harness::Dsh, &["--profile".into(), "custom".into()])
+                .is_err()
+        );
         assert!(
             validate_passthrough_args(
                 Harness::Dsh,

@@ -34,6 +34,15 @@ fn help_exposes_the_ori_compatible_surface() {
 }
 
 #[test]
+fn dsh_help_exposes_managed_profiles() {
+    cli().args(["dsh", "--help"]).assert().success().stdout(
+        predicate::str::contains("--profile <PROFILE>")
+            .and(predicate::str::contains("headless"))
+            .and(predicate::str::contains("web")),
+    );
+}
+
+#[test]
 fn json_version_is_exactly_one_document() {
     let output = cli().args(["--json", "version"]).output().unwrap();
     assert!(output.status.success());

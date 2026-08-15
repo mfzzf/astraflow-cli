@@ -138,6 +138,20 @@ unset HARNESS_BINARY
 run_case dsh 'Reply with exactly ASTRAFLOW_OK'
 run_case prime-agent --print 'Reply with exactly ASTRAFLOW_OK'
 
+set +e
+timeout 10 astraflow dsh --model astraflow-test-model --profile web \
+  >/tmp/dsh-web.out 2>/tmp/dsh-web.err
+dsh_web_status=$?
+set -e
+if [ "$dsh_web_status" -ne 124 ]; then
+  printf 'dsh web exited before the test timeout (status %s)\n' "$dsh_web_status" >&2
+  sed -n '1,120p' /tmp/dsh-web.out >&2
+  sed -n '1,120p' /tmp/dsh-web.err >&2
+  exit 1
+fi
+grep -Fq 'dsh web: http://127.0.0.1:' /tmp/dsh-web.out
+echo 'dsh: managed web profile startup verified'
+
 for executable in claude codex grok opencode hermes pi dsh prime-agent; do
   command -v "$executable" >/dev/null
 done

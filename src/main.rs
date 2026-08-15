@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use astraflow::cli::{
-    Cli, Command as CliCommand, CompletionShell, HarnessCommand, HarnessLaunchArgs, Language,
-    ModelVerseRegion,
+    Cli, Command as CliCommand, CompletionShell, DshLaunchArgs, HarnessCommand, HarnessLaunchArgs,
+    Language, ModelVerseRegion,
 };
 use astraflow::config::{self, Credential, OAuthProvider, ResolvedCredential};
 use astraflow::harness::{self, Harness};
@@ -112,7 +112,7 @@ async fn run(cli: Cli, mode: OutputMode) -> Result<i32> {
         CliCommand::Opencode(args) => launch(Harness::Opencode, args, &cwd).await,
         CliCommand::Hermes(args) => launch(Harness::Hermes, args, &cwd).await,
         CliCommand::Pi(args) => launch(Harness::Pi, args, &cwd).await,
-        CliCommand::Dsh(args) => launch(Harness::Dsh, args, &cwd).await,
+        CliCommand::Dsh(args) => launch_dsh(args, &cwd).await,
         CliCommand::PrimeAgent(args) => launch(Harness::PrimeAgent, args, &cwd).await,
         CliCommand::HarnessDoctor => harness_doctor(mode, &cwd),
         CliCommand::Workspace(args) => workspace(mode, &cwd, args.repair),
@@ -373,6 +373,21 @@ async fn launch(harness: Harness, args: HarnessLaunchArgs, cwd: &Path) -> Result
         &credential,
         args.binary.as_deref(),
         &args.args,
+        args.model.as_deref(),
+    )
+    .await?;
+    Ok(status.code().unwrap_or(1))
+}
+
+async fn launch_dsh(args: DshLaunchArgs, cwd: &Path) -> Result<i32> {
+    let credential = require_credential(cwd)?;
+    let mut passthrough = vec!["--profile".to_owned(), args.profile.as_str().to_owned()];
+    passthrough.extend(args.args);
+    let status = harness::launch(
+        Harness::Dsh,
+        &credential,
+        args.binary.as_deref(),
+        &passthrough,
         args.model.as_deref(),
     )
     .await?;

@@ -43,6 +43,23 @@ pub enum ModelVerseRegion {
     Frankfurt,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum DshProfile {
+    /// Run one headless task and exit
+    Headless,
+    /// Start the DSH browser UI
+    Web,
+}
+
+impl DshProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Headless => "headless",
+            Self::Web => "web",
+        }
+    }
+}
+
 impl ModelVerseRegion {
     pub const ALL: [Self; 4] = [
         Self::China,
@@ -141,7 +158,7 @@ pub enum Command {
 
     /// Set up or launch DeepSeek Harness
     #[command(alias = "deepseek")]
-    Dsh(HarnessLaunchArgs),
+    Dsh(DshLaunchArgs),
 
     /// Launch Prime Agent with AstraFlow's ModelVerse environment
     #[command(alias = "prime")]
@@ -229,6 +246,25 @@ pub struct HarnessLaunchArgs {
     pub model: Option<String>,
 
     /// Arguments passed through to the harness
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct DshLaunchArgs {
+    /// Override the DSH executable
+    #[arg(long)]
+    pub binary: Option<PathBuf>,
+
+    /// Override the AstraFlow-selected model for this launch
+    #[arg(long)]
+    pub model: Option<String>,
+
+    /// Start a headless task or the browser UI
+    #[arg(long, value_enum, default_value_t = DshProfile::Headless)]
+    pub profile: DshProfile,
+
+    /// Arguments passed through to DSH or the selected profile
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub args: Vec<String>,
 }

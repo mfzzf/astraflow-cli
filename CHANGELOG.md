@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.8 — 2026-08-15
+
+- Added an AstraFlow-managed DSH Web profile: `astraflow dsh --model <model> --profile web` now starts the browser UI while preserving the injected ModelVerse endpoint, key, model, and protected patch layer.
+- Kept `headless` as the default DSH profile and continued rejecting custom profiles and user-supplied patches that could replace AstraFlow routing.
+
 ## 0.2.7 — 2026-08-15
 
 - Built both Linux GNU release targets inside Rust 1.88 Bookworm containers so published binaries run on glibc 2.36 systems such as Debian 12 instead of requiring the build runner's glibc 2.39.

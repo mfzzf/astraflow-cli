@@ -32,7 +32,7 @@ By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTRAFLOW_VERSION=0.2.7 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
+  ASTRAFLOW_VERSION=0.2.8 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -99,7 +99,14 @@ astraflow claude -- --permission-mode plan
 
 Provider, model, API-key, config, profile, patch, plugin, and extension flags that could replace AstraFlow routing are rejected after `--`; select the model with the outer `astraflow <harness> --model ...` option instead.
 
-Wrapped launches isolate every harness from conflicting local state. Codex and Grok receive temporary homes; Claude ignores user/project/local settings; OpenCode disables project configuration, default plugins, external skills, and Claude compatibility imports; Hermes uses a temporary safe-mode profile and empty managed scope; Pi and Prime use temporary agent configuration while retaining their normal session directories; DSH uses an isolated home and managed headless patch. API keys are passed through process environment only and are never written into those temporary harness files.
+DSH supports AstraFlow-managed `headless` and `web` profiles. Headless requires a task; Web starts the browser UI while keeping AstraFlow's endpoint, key, and model patch:
+
+```bash
+astraflow dsh --model deepseek-v4-flash -- "run the tests"
+astraflow dsh --model deepseek-v4-flash --profile web
+```
+
+Wrapped launches isolate every harness from conflicting local state. Codex and Grok receive temporary homes; Claude ignores user/project/local settings; OpenCode disables project configuration, default plugins, external skills, and Claude compatibility imports; Hermes uses a temporary safe-mode profile and empty managed scope; Pi and Prime use temporary agent configuration while retaining their normal session directories; DSH uses an isolated home and managed profile patch. API keys are passed through process environment only and are never written into those temporary harness files.
 
 Organization-managed Claude, Codex, or Grok policy remains authoritative by design. If an administrator requires a conflicting provider, the wrapped launch fails instead of bypassing that policy.
 
@@ -165,7 +172,7 @@ docker build --target harness-all -t astraflow-harness-all .
 docker run --rm astraflow-harness-all
 ```
 
-Pushes to `main` run formatting, tests, Clippy, and hostile-config routing checks with pinned Claude Code 2.1.233, Codex CLI 0.147.0, Grok Build 1.0.4, OpenCode 1.18.18, Hermes Agent 0.19.0, Pi 0.84.2 and 0.73.1, DeepSeek Harness 0.1.0-rc.6, and Prime Agent 0.7.2 on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.7`, build Linux GNU binaries inside Rust 1.88 Bookworm containers for glibc 2.36 compatibility, plus native macOS Intel/Apple Silicon and Windows x64/ARM64 archives, before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
+Pushes to `main` run formatting, tests, Clippy, and hostile-config routing checks with pinned Claude Code 2.1.233, Codex CLI 0.147.0, Grok Build 1.0.4, OpenCode 1.18.18, Hermes Agent 0.19.0, Pi 0.84.2 and 0.73.1, DeepSeek Harness 0.1.0-rc.6, and Prime Agent 0.7.2 on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.8`, build Linux GNU binaries inside Rust 1.88 Bookworm containers for glibc 2.36 compatibility, plus native macOS Intel/Apple Silicon and Windows x64/ARM64 archives, before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
 
 ## 中文说明
 
@@ -173,7 +180,7 @@ Pushes to `main` run formatting, tests, Clippy, and hostile-config routing check
 
 登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，并在本地按模型 ID、模型广场名称和别名判断协议，不再调用模型详情接口。Claude 系列固定使用 Anthropic Messages API；GPT、o-series 和 Codex 系列可供 Responses 使用；其余对话文本模型使用 Chat Completions。图片、视频、音频生成、Embedding、Rerank、OCR 和 Batch 模型会被排除。每种协议默认选择认证模型列表中 `created` 时间戳最新的可用模型；重新执行 `astraflow login` 即可刷新。
 
-启动 harness 时，`astraflow` 会隔离用户、项目和本地配置，并显式固定 endpoint、key、provider 和 model。`--` 后仍可传递普通参数，但会拒绝能够覆盖路由的内部 model/provider/config/profile/patch/plugin/extension 参数；请使用外层 `astraflow <harness> --model ...` 选择模型。
+启动 harness 时，`astraflow` 会隔离用户、项目和本地配置，并显式固定 endpoint、key、provider 和 model。`--` 后仍可传递普通参数，但会拒绝能够覆盖路由的内部 model/provider/config/profile/patch/plugin/extension 参数；请使用外层 `astraflow <harness> --model ...` 选择模型。DSH 例外允许由 AstraFlow 管理的 `--profile web` 和 `--profile headless`，但仍禁止自定义 profile 与 patch 覆盖。
 
 Linux / macOS 一键安装：
 
