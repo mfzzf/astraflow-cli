@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.9 — 2026-08-15
+
+- Removed harness-specific model-family filtering: Claude Code, Codex, and every other agent now share the complete conversational text model inventory returned by authenticated `/v1/models`.
+- Treat every listed conversational text model as compatible with Chat Completions, Responses, and Anthropic Messages until maintained protocol capability metadata is available.
+- Prefer `deepseek-v4-flash-0731` as the default for every protocol and fall back to the shared chat default when an older saved credential has no protocol-specific selection.
+
 ## 0.2.8 — 2026-08-15
 
 - Added an AstraFlow-managed DSH Web profile: `astraflow dsh --model <model> --profile web` now starts the browser UI while preserving the injected ModelVerse endpoint, key, model, and protected patch layer.

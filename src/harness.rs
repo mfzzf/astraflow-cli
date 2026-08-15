@@ -255,7 +255,8 @@ pub fn selected_model(
         Harness::Codex => credential.models.responses.as_ref(),
         Harness::Claude => credential.models.anthropic.as_ref(),
         _ => credential.models.chat_completions.as_ref(),
-    };
+    }
+    .or(credential.models.chat_completions.as_ref());
     if let Some(model) = selected.cloned().or_else(|| {
         env::var("ASTRAFLOW_MODEL")
             .ok()
@@ -263,25 +264,7 @@ pub fn selected_model(
     }) {
         return Ok(model);
     }
-    let discovery_was_saved = credential.models.chat_completions.is_some()
-        || credential.models.responses.is_some()
-        || credential.models.anthropic.is_some();
-    if discovery_was_saved {
-        let protocol = match harness {
-            Harness::Codex => "Responses",
-            Harness::Claude => "Anthropic Messages",
-            _ => "Chat Completions",
-        };
-        bail!(
-            "the selected ModelVerse key has no {protocol}-capable model for {}; use --model to override or log in with another key",
-            harness.name()
-        );
-    }
-    Ok(match harness {
-        Harness::Claude => "claude-sonnet-4-6".to_owned(),
-        Harness::Codex => "gpt-4.1-mini".to_owned(),
-        _ => crate::modelverse::PREFERRED_CHAT_MODEL.to_owned(),
-    })
+    Ok(crate::modelverse::PREFERRED_CHAT_MODEL.to_owned())
 }
 
 pub fn environment(
@@ -1634,11 +1617,13 @@ mod tests {
     }
 
     #[test]
-    fn discovered_credentials_do_not_guess_an_incompatible_codex_model() {
+    fn codex_falls_back_to_the_shared_chat_model() {
         let mut cred = credential();
         cred.models.responses = None;
-        let error = selected_model(Harness::Codex, &cred, None).unwrap_err();
-        assert!(error.to_string().contains("no Responses-capable model"));
+        assert_eq!(
+            selected_model(Harness::Codex, &cred, None).unwrap(),
+            "chat-model"
+        );
     }
 
     #[test]

@@ -95,16 +95,11 @@ pub fn model_ids(available: &[AvailableModel]) -> Vec<String> {
     available.iter().map(|model| model.id.clone()).collect()
 }
 
-pub fn compatible_models(available: &[AvailableModel], harness: Harness) -> Vec<AvailableModel> {
-    available
-        .iter()
-        .filter(|model| match harness {
-            Harness::Claude => looks_like_anthropic_model(&model.id),
-            Harness::Codex => looks_like_responses_model(&model.id),
-            _ => !looks_like_anthropic_model(&model.id),
-        })
-        .cloned()
-        .collect()
+pub fn compatible_models(available: &[AvailableModel], _harness: Harness) -> Vec<AvailableModel> {
+    // Until ModelVerse exposes maintained per-model protocol capability data, treat every
+    // conversational text model as compatible with every harness. `list_models` already removes
+    // image, video, audio, embedding, rerank, OCR, batch, and moderation-only models.
+    available.to_vec()
 }
 
 pub fn price_summary(model: &AvailableModel) -> String {
@@ -185,26 +180,16 @@ fn normalized_text_charge_item(item: &str) -> Option<&'static str> {
 }
 
 pub fn select_models(available: &[AvailableModel], catalog: &[SquareModel]) -> ModelSelection {
-    let chat_candidates: Vec<&AvailableModel> = available
+    let text_candidates: Vec<&AvailableModel> = available
         .iter()
         .filter(|model| model_labels(&model.id, catalog).all(looks_like_coding_text_model))
-        .filter(|model| !model_labels(&model.id, catalog).any(looks_like_anthropic_model))
         .collect();
-    let response_candidates: Vec<&AvailableModel> = available
-        .iter()
-        .filter(|model| model_labels(&model.id, catalog).all(looks_like_coding_text_model))
-        .filter(|model| model_labels(&model.id, catalog).any(looks_like_responses_model))
-        .collect();
-    let anthropic_candidates: Vec<&AvailableModel> = available
-        .iter()
-        .filter(|model| model_labels(&model.id, catalog).all(looks_like_coding_text_model))
-        .filter(|model| model_labels(&model.id, catalog).any(looks_like_anthropic_model))
-        .collect();
+    let selected = select_preferred(&text_candidates, PREFERRED_CHAT_MODEL);
 
     ModelSelection {
-        chat_completions: select_preferred(&chat_candidates, PREFERRED_CHAT_MODEL),
-        responses: select_latest(&response_candidates),
-        anthropic: select_latest(&anthropic_candidates),
+        chat_completions: selected.clone(),
+        responses: selected.clone(),
+        anthropic: selected,
     }
 }
 
@@ -349,35 +334,6 @@ fn looks_like_coding_text_model(id: &str) -> bool {
         && !leaf.starts_with("e5-")
 }
 
-fn looks_like_responses_model(id: &str) -> bool {
-    let lower = normalize_model_name(id);
-    let leaf = model_leaf(&lower);
-    leaf.starts_with("gpt-")
-        || leaf.contains("codex")
-        || matches!(leaf.split('-').next(), Some("o1" | "o3" | "o4"))
-}
-
-fn looks_like_anthropic_model(id: &str) -> bool {
-    let normalized = normalize_model_name(id);
-    let leaf = model_leaf(&normalized);
-    leaf == "claude" || leaf.starts_with("claude-")
-}
-
-fn normalize_model_name(id: &str) -> String {
-    let mut normalized = String::with_capacity(id.len());
-    let mut last_was_separator = false;
-    for character in id.chars().flat_map(char::to_lowercase) {
-        if character.is_ascii_alphanumeric() || character == '/' {
-            normalized.push(character);
-            last_was_separator = false;
-        } else if !last_was_separator {
-            normalized.push('-');
-            last_was_separator = true;
-        }
-    }
-    normalized.trim_matches('-').to_owned()
-}
-
 fn model_leaf(id: &str) -> &str {
     id.rsplit('/').next().unwrap_or(id)
 }
@@ -438,24 +394,16 @@ mod tests {
     }
 
     #[test]
-    fn interactive_inventory_is_filtered_for_each_harness_protocol() {
+    fn interactive_inventory_is_shared_by_every_harness() {
         let models = inventory(&[
             ("claude-opus-5", 3),
             ("gpt-5.6-luna", 2),
             ("deepseek-v4-pro-0813", 1),
         ]);
-        assert_eq!(
-            model_ids(&compatible_models(&models, Harness::Claude)),
-            ["claude-opus-5"]
-        );
-        assert_eq!(
-            model_ids(&compatible_models(&models, Harness::Codex)),
-            ["gpt-5.6-luna"]
-        );
-        assert_eq!(
-            model_ids(&compatible_models(&models, Harness::Grok)),
-            ["gpt-5.6-luna", "deepseek-v4-pro-0813"]
-        );
+        let expected = ["claude-opus-5", "gpt-5.6-luna", "deepseek-v4-pro-0813"];
+        for harness in [Harness::Claude, Harness::Codex, Harness::Grok] {
+            assert_eq!(model_ids(&compatible_models(&models, harness)), expected);
+        }
     }
 
     #[test]
@@ -486,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn local_rules_split_harness_models_without_protocol_metadata() {
+    fn protocol_defaults_share_the_same_text_inventory() {
         let models = inventory(&[
             ("chat-only", 10),
             ("gpt-4.1-mini", 20),
@@ -498,8 +446,11 @@ mod tests {
             aliases: vec!["anthropic/claude-sonnet-4-5".into()],
         }];
         let selected = select_models(&models, &catalog);
-        assert_eq!(selected.chat_completions.as_deref(), Some("gpt-4.1-mini"));
-        assert_eq!(selected.responses.as_deref(), Some("gpt-4.1-mini"));
+        assert_eq!(
+            selected.chat_completions.as_deref(),
+            Some("opaque-claude-id")
+        );
+        assert_eq!(selected.responses.as_deref(), Some("opaque-claude-id"));
         assert_eq!(selected.anthropic.as_deref(), Some("opaque-claude-id"));
     }
 
@@ -519,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_models_are_anthropic_only() {
+    fn every_protocol_can_default_to_any_text_model() {
         let models = inventory(&[
             ("claude-haiku-4-5-20251001", 10),
             ("claude-sonnet-5", 30),
@@ -531,8 +482,14 @@ mod tests {
             selected.chat_completions.as_deref(),
             Some("deepseek-ai/DeepSeek-V3.2")
         );
-        assert_eq!(selected.responses, None);
-        assert_eq!(selected.anthropic.as_deref(), Some("claude-opus-5"));
+        assert_eq!(
+            selected.responses.as_deref(),
+            Some("deepseek-ai/DeepSeek-V3.2")
+        );
+        assert_eq!(
+            selected.anthropic.as_deref(),
+            Some("deepseek-ai/DeepSeek-V3.2")
+        );
     }
 
     #[test]
@@ -548,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn chat_prefers_astraflow_default_while_other_protocols_use_latest() {
+    fn every_protocol_prefers_the_astraflow_default() {
         let models = inventory(&[
             ("gemini-3.7-flash", 400),
             ("claude-opus-5", 300),
@@ -560,8 +517,14 @@ mod tests {
             selected.chat_completions.as_deref(),
             Some("deepseek-v4-flash-0731")
         );
-        assert_eq!(selected.responses.as_deref(), Some("gpt-5.6-luna"));
-        assert_eq!(selected.anthropic.as_deref(), Some("claude-opus-5"));
+        assert_eq!(
+            selected.responses.as_deref(),
+            Some("deepseek-v4-flash-0731")
+        );
+        assert_eq!(
+            selected.anthropic.as_deref(),
+            Some("deepseek-v4-flash-0731")
+        );
     }
 
     #[tokio::test]

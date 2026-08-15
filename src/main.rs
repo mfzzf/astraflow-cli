@@ -442,26 +442,28 @@ async fn resolve_launch_models(
         bail!("no compatible model is available for {}", harness.name());
     }
     let mut defaults = config::load_harness_models(harness.name())?;
-    let protocol_default = match harness {
+    let saved_default = match harness {
         Harness::Claude => credential.models.anthropic.as_deref(),
         Harness::Codex => credential.models.responses.as_deref(),
-        _ => compatible
-            .iter()
-            .find(|model| {
-                model
-                    .id
-                    .eq_ignore_ascii_case(modelverse::PREFERRED_CHAT_MODEL)
-            })
-            .map(|model| model.id.as_str())
-            .or(credential.models.chat_completions.as_deref()),
-    }
-    .filter(|id| {
-        compatible
-            .iter()
-            .any(|model| model.id.eq_ignore_ascii_case(id))
-    })
-    .unwrap_or(&compatible[0].id)
-    .to_owned();
+        _ => credential.models.chat_completions.as_deref(),
+    };
+    let protocol_default = compatible
+        .iter()
+        .find(|model| {
+            model
+                .id
+                .eq_ignore_ascii_case(modelverse::PREFERRED_CHAT_MODEL)
+        })
+        .map(|model| model.id.as_str())
+        .or(saved_default)
+        .or(credential.models.chat_completions.as_deref())
+        .filter(|id| {
+            compatible
+                .iter()
+                .any(|model| model.id.eq_ignore_ascii_case(id))
+        })
+        .unwrap_or(&compatible[0].id)
+        .to_owned();
     for slot in harness::model_slots(harness)
         .into_iter()
         .filter(|slot| !slot.multiple)

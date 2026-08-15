@@ -145,7 +145,7 @@ fn imported_key_is_validated_and_saved_privately() {
     assert_eq!(value["region"], "china");
     assert_eq!(value["models"]["chat_completions"], "gpt-5-mini");
     assert_eq!(value["models"]["responses"], "gpt-5-mini");
-    assert!(value["models"]["anthropic"].is_null());
+    assert_eq!(value["models"]["anthropic"], "gpt-5-mini");
     let path = home.path().join("credentials.json");
     let stored = fs::read_to_string(&path).unwrap();
     assert!(stored.contains("imported-test-key"));
