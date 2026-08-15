@@ -36,36 +36,10 @@ pub struct UsageDetail {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApiProtocols {
-    pub chat_completions: bool,
-    pub responses: bool,
-    pub gemini: bool,
-    pub anthropic: bool,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SquareModel {
     pub id: String,
     pub name: String,
     pub aliases: Vec<String>,
-    pub api_protocols: ApiProtocols,
-}
-
-#[cfg(test)]
-impl SquareModel {
-    pub fn test(name: &str, chat: bool, responses: bool, anthropic: bool) -> Self {
-        Self {
-            id: name.to_owned(),
-            name: name.to_owned(),
-            aliases: Vec::new(),
-            api_protocols: ApiProtocols {
-                chat_completions: chat,
-                responses,
-                gemini: false,
-                anthropic,
-            },
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -139,9 +113,8 @@ impl OAuthControlPlane {
             .ok_or_else(|| anyhow!("CreateUMInferAPIKey returned no usable API key"))
     }
 
-    /// Read the ModelVerse catalog and enrich only models exposed by the
-    /// selected inference key. Detail reads are capped so login cannot fan out
-    /// across the full public marketplace.
+    /// Read catalog names and aliases only for models exposed by the selected
+    /// inference key. Protocol selection is deliberately performed locally.
     pub async fn square_models(
         &self,
         project_id: &str,
@@ -161,44 +134,14 @@ impl OAuthControlPlane {
                 .or_else(|| payload.get("Data"))
                 .or_else(|| payload.get("ModelSet")),
         );
-        let mut result = Vec::new();
-        let mut detail_requests = 0_usize;
-        for entry in entries {
-            let Some(id) = text(entry.get("Id").or_else(|| entry.get("ModelId"))) else {
-                continue;
-            };
-            let mut model = normalize_square_model(entry, &id);
-            if !matches_available(&model, available) {
-                continue;
-            }
-            if !has_protocols(entry) {
-                if detail_requests >= 12 {
-                    continue;
-                }
-                detail_requests += 1;
-                let Ok(detail) = self.square_model_detail(project_id, &id).await else {
-                    continue;
-                };
-                model = detail;
-            }
-            result.push(model);
-        }
-        Ok(result)
-    }
-
-    pub async fn square_model_detail(&self, project_id: &str, id: &str) -> Result<SquareModel> {
-        let payload = self
-            .call(json!({
-                "Action": "GetUFSquareModelDetail",
-                "ProjectId": project_id,
-                "Id": id
-            }))
-            .await?;
-        let data = payload
-            .get("Data")
-            .or_else(|| payload.get("SquareModel"))
-            .unwrap_or(&payload);
-        Ok(normalize_square_model(data, id))
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| {
+                let id = text(entry.get("Id").or_else(|| entry.get("ModelId")))?;
+                let model = normalize_square_model(entry, &id);
+                matches_available(&model, available).then_some(model)
+            })
+            .collect())
     }
 
     async fn call(&self, body: Value) -> Result<Value> {
@@ -251,22 +194,7 @@ fn normalize_square_model(value: &Value, fallback_id: &str) -> SquareModel {
         .flatten()
         .filter_map(|entry| text(Some(entry)))
         .collect();
-    let protocols = value.get("ApiProtocols").unwrap_or(&Value::Null);
-    SquareModel {
-        id,
-        name,
-        aliases,
-        api_protocols: ApiProtocols {
-            chat_completions: truthy(protocols.get("ChatCompletions")),
-            responses: truthy(protocols.get("Responses")),
-            gemini: truthy(protocols.get("Gemini")),
-            anthropic: truthy(protocols.get("Anthropic")),
-        },
-    }
-}
-
-fn has_protocols(value: &Value) -> bool {
-    value.get("ApiProtocols").is_some_and(Value::is_object)
+    SquareModel { id, name, aliases }
 }
 
 pub fn default_project(projects: &[Project]) -> Option<&Project> {
@@ -450,7 +378,6 @@ mod tests {
             id: "umodel-1".into(),
             name: "gpt-4.1-mini".into(),
             aliases: vec!["openai/gpt-4.1-mini".into()],
-            api_protocols: ApiProtocols::default(),
         };
         assert!(matches_available(&model, &["gpt-4.1-mini".into()]));
         assert!(matches_available(&model, &["openai/gpt-4.1-mini".into()]));
@@ -462,7 +389,12 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
-            for expected in ["GetProjectList", "ListUMInferAPIKey", "CreateUMInferAPIKey"] {
+            for expected in [
+                "GetProjectList",
+                "ListUMInferAPIKey",
+                "CreateUMInferAPIKey",
+                "ListUFSquareModel",
+            ] {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let mut bytes = vec![0_u8; 16 * 1024];
                 let size = stream.read(&mut bytes).await.unwrap();
@@ -484,9 +416,17 @@ mod tests {
                         "RetCode": 0,
                         "Data": [{"KeyId":"key-1","Name":"Existing","Key":"secret-1","Status":1}]
                     }),
-                    _ => json!({
+                    "CreateUMInferAPIKey" => json!({
                         "RetCode": 0,
                         "Data": {"KeyId":"key-2","Name":"AstraFlow Agent","Key":"secret-2","Status":1}
+                    }),
+                    _ => json!({
+                        "RetCode": 0,
+                        "Data": [{
+                            "Id": "umodel-1",
+                            "Name": "gpt-4.1-mini",
+                            "Aliases": ["openai/gpt-4.1-mini"]
+                        }]
                     }),
                 }
                 .to_string();
@@ -513,6 +453,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(created.id, "key-2");
+        let catalog = control
+            .square_models("org-default", &["gpt-4.1-mini".into()])
+            .await
+            .unwrap();
+        assert_eq!(catalog[0].name, "gpt-4.1-mini");
         server.await.unwrap();
     }
 }

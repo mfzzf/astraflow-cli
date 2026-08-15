@@ -118,6 +118,11 @@ fn imported_key_is_validated_and_saved_privately() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["validated_model"], "gpt-5-mini");
+    assert_eq!(value["endpoint"], format!("http://{address}"));
+    assert_eq!(value["region"], "china");
+    assert_eq!(value["models"]["chat_completions"], "gpt-5-mini");
+    assert_eq!(value["models"]["responses"], "gpt-5-mini");
+    assert!(value["models"]["anthropic"].is_null());
     let path = home.path().join("credentials.json");
     let stored = fs::read_to_string(&path).unwrap();
     assert!(stored.contains("imported-test-key"));

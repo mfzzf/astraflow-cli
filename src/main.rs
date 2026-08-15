@@ -166,7 +166,15 @@ async fn login(
         config::save_credential(&path, &credential)?;
         return mode.print(
             format!("{} Validated with {model}.", messages.ready()),
-            &json!({"ok": true, "source": "imported", "path": path, "validated_model": model}),
+            &json!({
+                "ok": true,
+                "source": "imported",
+                "path": path,
+                "region": credential.region,
+                "endpoint": credential.endpoint,
+                "models": credential.models,
+                "validated_model": model
+            }),
         );
     }
 

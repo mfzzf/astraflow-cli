@@ -1,9 +1,16 @@
 # Changelog
 
+## 0.2.1 — 2026-08-15
+
+- Removed all `GetUFSquareModelDetail` requests and protocol-metadata dependencies.
+- Added local protocol classification from `/v1/models` IDs plus optional catalog names and aliases.
+- Routed Claude model families exclusively through the Anthropic Messages API.
+- Expanded filtering for image/video/audio generation, embeddings, rerank, OCR, batch, transcription, and moderation models while retaining vision-language chat models.
+
 ## 0.2.0 — 2026-08-15
 
 - Added China, Singapore, Los Angeles, and Frankfurt ModelVerse region selection.
-- Added `/v1/models` discovery and protocol-aware model selection from `ListUFSquareModel` and `GetUFSquareModelDetail`.
+- Added `/v1/models` discovery and model-square catalog correlation.
 - Made all eight harness launchers override conflicting endpoint, credential, provider, and model configuration deterministically.
 - Added a pinned Docker image that runs Claude Code, Codex CLI, Grok Build, OpenCode, Hermes Agent, Pi, DeepSeek Harness, and Prime Agent against a hostile-config routing test.
 - Changed `harness test --live` to invoke the real installed harness instead of an internal probe.

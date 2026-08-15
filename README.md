@@ -32,7 +32,7 @@ By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTF_VERSION=0.2.0 ASTF_INSTALL_DIR="$HOME/bin" sh
+  ASTF_VERSION=0.2.1 ASTF_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -57,7 +57,9 @@ The first interactive login asks for English or Chinese and one of four ModelVer
 | `los-angeles` | `https://api-us-ca.umodelverse.ai` |
 | `frankfurt` | `https://api-ge-fra.umodelverse.ai` |
 
-Login reads the selected region's `/v1/models` endpoint to learn which model IDs the key can use. OAuth login also correlates those IDs with the read-only UCloud model-square catalog and detail endpoints, so Codex receives a Responses-capable model, Claude receives an Anthropic-capable model, and the other harnesses receive a Chat Completions-capable model. If catalog access is denied, `astf` falls back to conservative model-name detection.
+Login reads the selected region's `/v1/models` endpoint to learn which model IDs the key can use. OAuth login may correlate those IDs with names and aliases from the read-only `ListUFSquareModel` catalog, but it never reads model-detail protocol metadata. `astf` classifies protocols locally: Claude IDs use the Anthropic Messages API, OpenAI GPT/o-series/Codex IDs can use Responses, and other conversational text models use Chat Completions. Dedicated image/video/audio generation, embedding, rerank, OCR, batch, transcription, and moderation models are excluded; vision-language chat models remain available.
+
+ModelVerse documents its Claude-compatible endpoint as `POST /v1/messages` and limits that endpoint to Claude-series models, matching the [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages/create). Every `claude-*` model family—including current Sonnet, Opus, Haiku, and Fable IDs—is therefore selected only for the Claude launcher and never assigned to an OpenAI-compatible harness.
 
 See the [ModelVerse quick start](https://astraflow.ucloud.cn/docs/modelverse/quick-start) and an [example model playground/detail page](https://astraflow.ucloud.cn/modelverse/playground/umodel-1781663242).
 
@@ -112,7 +114,6 @@ The UCloud control-plane client intentionally exposes only:
 - `ListUMInferAPIKey`
 - `CreateUMInferAPIKey`
 - `ListUFSquareModel` (read-only model catalog)
-- `GetUFSquareModelDetail` (read-only protocol capabilities)
 - `GetUMInferRequestLogDetail` (read-only, signature-authenticated verification only)
 
 There is no delete/update/resource-management operation. Public/private UCloud keys are accepted only through process environment variables during explicit `harness test --live --verify-usage` and are never stored.
@@ -154,13 +155,13 @@ docker build --target harness-all -t astraflow-harness-all .
 docker run --rm astraflow-harness-all
 ```
 
-Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.0`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
+Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.1`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
 
 ## 中文说明
 
 `astf login` 会先选择中英文和中国大陆、新加坡、洛杉矶、法兰克福四个接入地域之一，然后通过浏览器完成 UCloud OAuth 登录，自动获取默认项目，列出可用的 ModelVerse API Key，并让用户选择。若项目中没有 Key，只会创建一个名为 `AstraFlow Agent` 的 UMInfer Key，不会执行其他资源操作。
 
-登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，并结合模型广场详情里的协议能力，为 Codex 选择 Responses 模型、为 Claude 选择 Anthropic 模型、为其余 CLI 选择 Chat Completions 模型。启动时 `astf` 会显式覆盖旧的 endpoint、key、provider 和 model 配置。
+登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，并在本地按模型 ID、模型广场名称和别名判断协议，不再调用模型详情接口。Claude 系列固定使用 Anthropic Messages API；GPT、o-series 和 Codex 系列可供 Responses 使用；其余对话文本模型使用 Chat Completions。图片、视频、音频生成、Embedding、Rerank、OCR 和 Batch 模型会被排除。启动时 `astf` 会显式覆盖旧的 endpoint、key、provider 和 model 配置。
 
 Linux / macOS 一键安装：
 
