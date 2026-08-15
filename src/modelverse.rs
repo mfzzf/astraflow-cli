@@ -25,6 +25,13 @@ pub struct ModelRate {
     pub unit: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PriceColumns {
+    pub input: String,
+    pub cache: String,
+    pub output: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatProbe {
     pub model: String,
@@ -126,6 +133,35 @@ pub fn compact_price_summary(model: &AvailableModel) -> String {
     if model.pricing.is_empty() {
         return "Price unavailable".to_owned();
     }
+    let groups = grouped_prices(model);
+    [("input", "in"), ("cache", "cache"), ("output", "out")]
+        .into_iter()
+        .filter_map(|(key, label)| {
+            groups
+                .get(key)
+                .map(|values| format!("{label} {}", format_price_group(values, "–", true)))
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+pub fn price_columns(model: &AvailableModel) -> PriceColumns {
+    let groups = grouped_prices(model);
+    let column = |key| {
+        groups
+            .get(key)
+            .map(|values| format_price_group(values, " · ", false))
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "—".to_owned())
+    };
+    PriceColumns {
+        input: column("input"),
+        cache: column("cache"),
+        output: column("output"),
+    }
+}
+
+fn grouped_prices(model: &AvailableModel) -> BTreeMap<&'static str, Vec<(String, String)>> {
     let mut groups: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
     for rate in &model.pricing {
         let Some(item) = normalized_text_charge_item(&rate.charge_item) else {
@@ -152,33 +188,29 @@ pub fn compact_price_summary(model: &AvailableModel) -> String {
             values.push(value);
         }
     }
-    [("input", "in"), ("cache", "cache"), ("output", "out")]
-        .into_iter()
-        .filter_map(|(key, label)| {
-            groups.get(key).map(|values| {
-                let shared_unit = values
-                    .first()
-                    .map(|(_, unit)| unit)
-                    .filter(|unit| values.iter().all(|(_, candidate)| candidate == *unit));
-                let rates = values
-                    .iter()
-                    .map(|(value, unit)| {
-                        if shared_unit.is_some() {
-                            value.clone()
-                        } else {
-                            format!("{value}/{unit}")
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("–");
-                match shared_unit {
-                    Some(unit) => format!("{label} {rates}/{unit}"),
-                    None => format!("{label} {rates}"),
-                }
-            })
+    groups
+}
+
+fn format_price_group(values: &[(String, String)], separator: &str, include_unit: bool) -> String {
+    let shared_unit = values
+        .first()
+        .map(|(_, unit)| unit)
+        .filter(|unit| values.iter().all(|(_, candidate)| candidate == *unit));
+    let rates = values
+        .iter()
+        .map(|(value, unit)| {
+            if shared_unit.is_some() {
+                value.clone()
+            } else {
+                format!("{value}/{unit}")
+            }
         })
         .collect::<Vec<_>>()
-        .join(" · ")
+        .join(separator);
+    match shared_unit {
+        Some(unit) if include_unit || unit != "1M" => format!("{rates}/{unit}"),
+        _ => rates,
+    }
 }
 
 fn parse_pricing(entry: &Value) -> Vec<ModelRate> {
@@ -472,6 +504,14 @@ mod tests {
         assert_eq!(
             compact_price_summary(&model),
             "in ¥36/1M · cache ¥3.6–¥45/1M · out ¥180/1M"
+        );
+        assert_eq!(
+            price_columns(&model),
+            PriceColumns {
+                input: "¥36".to_owned(),
+                cache: "¥3.6 · ¥45".to_owned(),
+                output: "¥180".to_owned(),
+            }
         );
     }
 

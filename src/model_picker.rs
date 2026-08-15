@@ -1,5 +1,5 @@
 use crate::config::HarnessModelSettings;
-use crate::modelverse::{AvailableModel, compact_price_summary, price_summary};
+use crate::modelverse::{AvailableModel, compact_price_summary, price_columns, price_summary};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
@@ -380,6 +380,7 @@ impl ModelPicker {
                         .eq_ignore_ascii_case(self.current_cursor())
                 })
                 .unwrap_or(0);
+            let split_prices = models_area.width >= 72;
             let rows = matches.iter().map(|index| {
                 let model = &self.models[*index];
                 let marker = if self.current_slot().multiple {
@@ -396,37 +397,60 @@ impl ModelPicker {
                 } else {
                     ""
                 };
-                Row::new([
-                    Cell::from(format!("{marker}{}", model.id)),
-                    Cell::from(compact_price_summary(model)),
-                ])
+                let mut cells = vec![Cell::from(format!("{marker}{}", model.id))];
+                if split_prices {
+                    let prices = price_columns(model);
+                    cells.extend([
+                        Cell::from(prices.input),
+                        Cell::from(prices.cache),
+                        Cell::from(prices.output),
+                    ]);
+                } else {
+                    cells.push(Cell::from(compact_price_summary(model)));
+                }
+                Row::new(cells)
             });
-            let header = Row::new(["MODEL", "TOKEN PRICE"])
+            let (headers, widths, spacing) = if split_prices {
+                (
+                    vec!["MODEL", "INPUT / 1M", "CACHE / 1M", "OUTPUT / 1M"],
+                    vec![
+                        Constraint::Percentage(38),
+                        Constraint::Percentage(17),
+                        Constraint::Percentage(28),
+                        Constraint::Percentage(17),
+                    ],
+                    1,
+                )
+            } else {
+                (
+                    vec!["MODEL", "TOKEN PRICE"],
+                    vec![Constraint::Percentage(46), Constraint::Percentage(54)],
+                    2,
+                )
+            };
+            let header = Row::new(headers)
                 .style(
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 )
                 .bottom_margin(1);
-            let table = Table::new(
-                rows,
-                [Constraint::Percentage(46), Constraint::Percentage(54)],
-            )
-            .header(header)
-            .block(
-                Block::new()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .title(title),
-            )
-            .column_spacing(2)
-            .row_highlight_style(
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("▶ ");
+            let table = Table::new(rows, widths)
+                .header(header)
+                .block(
+                    Block::new()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .title(title),
+                )
+                .column_spacing(spacing)
+                .row_highlight_style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol("▶ ");
             let mut state = TableState::default().with_selected(Some(selected_position));
             frame.render_stateful_widget(table, models_area, &mut state);
         }
@@ -613,7 +637,9 @@ mod tests {
             "Model Picker",
             "Search",
             "deepseek-v4-flash-0731",
-            "TOKEN PRICE",
+            "INPUT / 1M",
+            "CACHE / 1M",
+            "OUTPUT / 1M",
             "Saved as AstraFlow defaults",
         ] {
             assert!(
@@ -621,5 +647,12 @@ mod tests {
                 "missing {expected}:\n{rendered}"
             );
         }
+
+        let backend = TestBackend::new(60, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| picker.render(frame, "")).unwrap();
+        let rendered = terminal.backend().to_string();
+        assert!(rendered.contains("TOKEN PRICE"));
+        assert!(!rendered.contains("INPUT / 1M"));
     }
 }

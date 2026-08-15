@@ -2,6 +2,7 @@
 
 ## 0.3.0 — 2026-08-15
 
+- Split model pricing into aligned Input, Cache, and Output columns on normal-width terminals, with a compact responsive fallback for narrow terminals.
 - Added named provider configurations with a selectable default, explicit `--config <name>` routing, and secure config CRUD commands.
 - Added first-run onboarding for UCloud OAuth, direct AstraFlow API keys, and custom Base URL/API key providers using Chat Completions, Responses, or Anthropic Messages.
 
