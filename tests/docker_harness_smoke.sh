@@ -71,6 +71,18 @@ printf 'agent-default-model:\n  provider: astraflow\n  model: hostile-model\nllm
 export HOSTILE_KEY=must-not-be-used
 cd /tmp/astraflow-hostile-project
 
+wrong_status=$(curl -sS -o /tmp/wrong-key.json -w '%{http_code}' \
+  -H 'Authorization: Bearer deliberately-wrong-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"astraflow-test-model","messages":[{"role":"user","content":"test"}]}' \
+  http://127.0.0.1:18080/v1/chat/completions)
+if [ "$wrong_status" != 401 ]; then
+  printf 'wrong-key preflight returned HTTP %s instead of 401\n' "$wrong_status" >&2
+  exit 1
+fi
+grep -Fq 'Validate Certification failed' /tmp/wrong-key.json
+echo 'wrong-key preflight: HTTP 401 verified'
+
 run_case() {
   local name=$1
   shift

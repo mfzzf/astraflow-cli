@@ -1,4 +1,5 @@
-use crate::config::Credential;
+use crate::config::{Credential, HarnessModelSettings};
+use crate::model_picker::ModelSlot;
 use anyhow::{Context, Result, anyhow, bail};
 use directories::BaseDirs;
 use secrecy::{ExposeSecret, SecretString};
@@ -27,6 +28,12 @@ const SCRUBBED_ENV: &[&str] = &[
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_FABLE_MODEL",
     "CLAUDE_CODE_SUBAGENT_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
@@ -142,6 +149,84 @@ impl Harness {
     }
 }
 
+pub const DEFAULT_MODEL_SLOT: &str = "default";
+
+pub fn model_slots(harness: Harness) -> Vec<ModelSlot> {
+    let pairs: &[(&str, &str)] = match harness {
+        Harness::Claude => &[
+            ("default", "Default"),
+            ("fable", "Fable"),
+            ("opus", "Opus"),
+            ("sonnet", "Sonnet"),
+            ("haiku", "Haiku"),
+            ("agents", "Agents"),
+        ],
+        Harness::Codex => &[
+            ("default", "Default"),
+            ("review", "Review"),
+            ("agents", "Agents"),
+        ],
+        Harness::Grok => &[
+            ("default", "Default"),
+            ("summary", "Summary"),
+            ("prompt", "Prompts"),
+            ("general", "General Agent"),
+            ("explore", "Explore Agent"),
+            ("plan", "Plan Agent"),
+        ],
+        Harness::Opencode => &[
+            ("default", "Default"),
+            ("small", "Small"),
+            ("build", "Build"),
+            ("plan", "Plan"),
+            ("general", "General"),
+            ("explore", "Explore"),
+            ("compaction", "Compaction"),
+            ("title", "Title"),
+            ("summary", "Summary"),
+        ],
+        Harness::Pi | Harness::PrimeAgent => &[("default", "Default"), ("cycle", "Cycle Pool")],
+        Harness::Dsh => &[
+            ("default", "Default"),
+            ("title", "Title"),
+            ("compaction", "Compaction"),
+            ("spawn", "Spawn Agent"),
+            ("fork", "Fork Agent"),
+        ],
+        Harness::Hermes => &[("default", "Default")],
+    };
+    pairs
+        .iter()
+        .map(|(key, label)| ModelSlot {
+            key,
+            label,
+            multiple: *key == "cycle",
+        })
+        .collect()
+}
+
+fn model_for_slot<'a>(
+    models: &'a BTreeMap<String, String>,
+    slot: &str,
+    default: &'a str,
+) -> &'a str {
+    models
+        .get(slot)
+        .filter(|model| !model.trim().is_empty())
+        .map(String::as_str)
+        .unwrap_or(default)
+}
+
+fn unique_models<'a>(default: &'a str, models: &'a BTreeMap<String, String>) -> Vec<&'a str> {
+    let mut values = vec![default];
+    for model in models.values().map(String::as_str) {
+        if !values.iter().any(|value| value.eq_ignore_ascii_case(model)) {
+            values.push(model);
+        }
+    }
+    values
+}
+
 #[derive(Debug, Clone)]
 pub struct Environment {
     pub values: BTreeMap<String, String>,
@@ -194,7 +279,8 @@ pub fn selected_model(
     }
     Ok(match harness {
         Harness::Claude => "claude-sonnet-4-6".to_owned(),
-        _ => "gpt-4.1-mini".to_owned(),
+        Harness::Codex => "gpt-4.1-mini".to_owned(),
+        _ => crate::modelverse::PREFERRED_CHAT_MODEL.to_owned(),
     })
 }
 
@@ -203,6 +289,16 @@ pub fn environment(
     key: &SecretString,
     endpoint: &str,
     model: &str,
+) -> Environment {
+    environment_with_models(harness, key, endpoint, model, &BTreeMap::new())
+}
+
+pub fn environment_with_models(
+    harness: Harness,
+    key: &SecretString,
+    endpoint: &str,
+    model: &str,
+    models: &BTreeMap<String, String>,
 ) -> Environment {
     let key = key.expose_secret().to_owned();
     let root = endpoint.trim_end_matches('/');
@@ -215,15 +311,15 @@ pub fn environment(
         Harness::Claude => {
             values.insert("ANTHROPIC_AUTH_TOKEN".into(), key);
             values.insert("ANTHROPIC_BASE_URL".into(), root.to_owned());
-            for name in [
-                "ANTHROPIC_MODEL",
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-                "ANTHROPIC_DEFAULT_SONNET_MODEL",
-                "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                "ANTHROPIC_DEFAULT_FABLE_MODEL",
-                "CLAUDE_CODE_SUBAGENT_MODEL",
+            values.insert("ANTHROPIC_MODEL".into(), model.to_owned());
+            for (name, slot) in [
+                ("ANTHROPIC_DEFAULT_FABLE_MODEL", "fable"),
+                ("ANTHROPIC_DEFAULT_OPUS_MODEL", "opus"),
+                ("ANTHROPIC_DEFAULT_SONNET_MODEL", "sonnet"),
+                ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "haiku"),
+                ("CLAUDE_CODE_SUBAGENT_MODEL", "agents"),
             ] {
-                values.insert(name.into(), model.to_owned());
+                values.insert(name.into(), model_for_slot(models, slot, model).to_owned());
             }
             values.insert("NO_BROWSER".into(), "1".into());
         }
@@ -237,11 +333,32 @@ pub fn environment(
             values.insert("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT".into(), "1".into());
             values.insert("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS".into(), "1".into());
             values.insert("OPENCODE_PURE".into(), "1".into());
+            let registered: Map<String, Value> = unique_models(model, models)
+                .into_iter()
+                .map(|id| (id.to_owned(), json!({"name": id})))
+                .collect();
+            let mut agents = Map::new();
+            for slot in [
+                "build",
+                "plan",
+                "general",
+                "explore",
+                "compaction",
+                "title",
+                "summary",
+            ] {
+                agents.insert(
+                    slot.into(),
+                    json!({"model": format!("astraflow/{}", model_for_slot(models, slot, model))}),
+                );
+            }
             values.insert(
                 "OPENCODE_CONFIG_CONTENT".into(),
                 json!({
                     "plugin": [],
                     "model": format!("astraflow/{model}"),
+                    "small_model": format!("astraflow/{}", model_for_slot(models, "small", model)),
+                    "agent": agents,
                     "provider": {
                         "astraflow": {
                             "name": "AstraFlow ModelVerse",
@@ -251,9 +368,7 @@ pub fn environment(
                                 "baseURL": openai_base,
                                 "apiKey": "{env:ASTRAFLOW_MODELVERSE_API_KEY}"
                             },
-                            "models": {
-                                model: {"name": model}
-                            }
+                            "models": registered
                         }
                     }
                 })
@@ -271,15 +386,20 @@ pub fn environment(
         Harness::Grok => {
             // Grok 1.0.4 uses these values for wire-level main and auxiliary
             // requests even when --model selects a named custom backend.
-            for name in [
-                "GROK_DEFAULT_MODEL",
-                "GROK_WEB_SEARCH_MODEL",
-                "GROK_SESSION_SUMMARY_MODEL",
-                "GROK_IMAGE_DESCRIPTION_MODEL",
-                "GROK_PROMPT_SUGGESTIONS_MODEL",
-            ] {
-                values.insert(name.into(), model.to_owned());
-            }
+            values.insert("GROK_DEFAULT_MODEL".into(), model.to_owned());
+            values.insert(
+                "GROK_WEB_SEARCH_MODEL".into(),
+                model_for_slot(models, "web", model).to_owned(),
+            );
+            values.insert(
+                "GROK_SESSION_SUMMARY_MODEL".into(),
+                model_for_slot(models, "summary", model).to_owned(),
+            );
+            values.insert("GROK_IMAGE_DESCRIPTION_MODEL".into(), model.to_owned());
+            values.insert(
+                "GROK_PROMPT_SUGGESTIONS_MODEL".into(),
+                model_for_slot(models, "prompt", model).to_owned(),
+            );
         }
         Harness::Pi => {
             // Pi <= 0.73 resolves the entire models.json apiKey string as an
@@ -334,29 +454,57 @@ pub async fn launch(
     args: &[String],
     override_model: Option<&str>,
 ) -> Result<ExitStatus> {
+    let mut models = HarnessModelSettings::default();
+    if let Some(model) = override_model.filter(|model| !model.trim().is_empty()) {
+        models
+            .slots
+            .insert(DEFAULT_MODEL_SLOT.into(), model.trim().to_owned());
+    }
+    launch_with_models(harness, credential, binary, args, &models).await
+}
+
+pub async fn launch_with_models(
+    harness: Harness,
+    credential: &Credential,
+    binary: Option<&Path>,
+    args: &[String],
+    models: &HarnessModelSettings,
+) -> Result<ExitStatus> {
     let executable = binary
         .map(PathBuf::from)
         .or_else(|| which::which(harness.executable()).ok())
         .ok_or_else(|| anyhow!("{} is not installed or not on PATH", harness.executable()))?;
     validate_passthrough_args(harness, args)?;
-    let model = selected_model(harness, credential, override_model)?;
-    let mut overlay = environment(harness, &credential.api_key, &credential.endpoint, &model);
+    let model = selected_model(
+        harness,
+        credential,
+        models.slots.get(DEFAULT_MODEL_SLOT).map(String::as_str),
+    )?;
+    let mut overlay = environment_with_models(
+        harness,
+        &credential.api_key,
+        &credential.endpoint,
+        &model,
+        &models.slots,
+    );
     let mut artifacts = Vec::new();
     let mut artifact_dirs = Vec::new();
     prepare_configuration(
         harness,
         &credential.endpoint,
         &model,
+        models,
         &mut overlay,
         &mut artifacts,
         &mut artifact_dirs,
     )?;
-    let args = command_arguments(
+    let args = command_arguments_with_models(
         harness,
         &credential.endpoint,
         &model,
         args,
         artifacts.first().map(|file| file.path()),
+        models,
     );
     run_with_environment(&executable, &args, &overlay).await
 }
@@ -381,6 +529,7 @@ pub async fn launch_capture(
         harness,
         &credential.endpoint,
         &model,
+        &HarnessModelSettings::default(),
         &mut overlay,
         &mut artifacts,
         &mut artifact_dirs,
@@ -443,6 +592,13 @@ fn validate_passthrough_args(harness: Harness, args: &[String]) -> Result<()> {
         }
     }
     let conflicts = match harness {
+        Harness::Claude => [
+            "--model",
+            "--settings",
+            "--setting-sources",
+            "--fallback-model",
+        ]
+        .as_slice(),
         Harness::Codex => [
             "-m",
             "--model",
@@ -453,12 +609,18 @@ fn validate_passthrough_args(harness: Harness, args: &[String]) -> Result<()> {
         ]
         .as_slice(),
         Harness::Grok => ["-m", "--model"].as_slice(),
+        Harness::Opencode => ["-m", "--model"].as_slice(),
         Harness::Hermes => ["--profile", "-p", "--provider", "--model", "-m"].as_slice(),
         Harness::Dsh => ["--patch", "--dump-config", "--dump-default-config"].as_slice(),
-        Harness::Pi | Harness::PrimeAgent => {
-            ["--provider", "--model", "--api-key", "-e", "--extension"].as_slice()
-        }
-        _ => return Ok(()),
+        Harness::Pi | Harness::PrimeAgent => [
+            "--provider",
+            "--model",
+            "--models",
+            "--api-key",
+            "-e",
+            "--extension",
+        ]
+        .as_slice(),
     };
     for arg in args {
         let exact = conflicts.contains(&arg.as_str());
@@ -478,12 +640,15 @@ fn validate_passthrough_args(harness: Harness, args: &[String]) -> Result<()> {
                 .iter()
                 .any(|flag| arg.starts_with(flag) && arg != flag);
         let attached_grok_short = harness == Harness::Grok && arg.starts_with("-m") && arg != "-m";
+        let attached_opencode_short =
+            harness == Harness::Opencode && arg.starts_with("-m") && arg != "-m";
         if exact
             || assigned
             || attached_short_extension
             || attached_codex_short
             || attached_hermes_short
             || attached_grok_short
+            || attached_opencode_short
         {
             bail!(
                 "{} argument `{arg}` conflicts with AstraFlow routing; use the outer `astraflow {} --model ...` option and remove inner provider, model, key, config, or extension overrides",
@@ -499,6 +664,7 @@ fn prepare_configuration(
     harness: Harness,
     endpoint: &str,
     model: &str,
+    models: &HarnessModelSettings,
     overlay: &mut Environment,
     artifacts: &mut Vec<NamedTempFile>,
     artifact_dirs: &mut Vec<TempDir>,
@@ -517,14 +683,14 @@ fn prepare_configuration(
                 "CODEX_HOME".into(),
                 dir.path().to_string_lossy().into_owned(),
             );
-            if let Some(catalog) = codex_catalog(model)? {
+            if let Some(catalog) = codex_catalog(&unique_models(model, &models.slots))? {
                 artifacts.push(catalog);
             }
             artifact_dirs.push(dir);
         }
         Harness::Grok => {
             let dir = tempfile::tempdir().context("create temporary Grok home")?;
-            configure_grok(endpoint, model, Some(dir.path()))?;
+            configure_grok(endpoint, model, &models.slots, Some(dir.path()))?;
             overlay.values.insert(
                 "GROK_HOME".into(),
                 dir.path().to_string_lossy().into_owned(),
@@ -559,7 +725,7 @@ fn prepare_configuration(
                         .map(|dir| dir.join("sessions"))
                 });
             let dir = tempfile::tempdir().context("create temporary Pi-compatible agent home")?;
-            configure_pi_like(prime, endpoint, model, Some(dir.path()))?;
+            configure_pi_like(prime, endpoint, model, &models.cycle, Some(dir.path()))?;
             overlay
                 .values
                 .insert(agent_env.into(), dir.path().to_string_lossy().into_owned());
@@ -582,7 +748,7 @@ fn prepare_configuration(
             overlay
                 .values
                 .insert("DSH_HOME".into(), dir.path().to_string_lossy().into_owned());
-            artifacts.push(dsh_patch(endpoint, model)?);
+            artifacts.push(dsh_patch(endpoint, model, &models.slots)?);
             artifact_dirs.push(dir);
         }
         Harness::Hermes => {
@@ -634,6 +800,24 @@ pub fn command_arguments(
     args: &[String],
     patch_path: Option<&Path>,
 ) -> Vec<String> {
+    command_arguments_with_models(
+        harness,
+        endpoint,
+        model,
+        args,
+        patch_path,
+        &HarnessModelSettings::default(),
+    )
+}
+
+pub fn command_arguments_with_models(
+    harness: Harness,
+    endpoint: &str,
+    model: &str,
+    args: &[String],
+    patch_path: Option<&Path>,
+    models: &HarnessModelSettings,
+) -> Vec<String> {
     let base_url = format!("{}/v1", endpoint.trim_end_matches('/'));
     let mut configured = match harness {
         Harness::Codex => {
@@ -663,6 +847,16 @@ pub fn command_arguments(
                     toml_string(&path.display().to_string())
                 ));
             }
+            for (key, slot) in [
+                ("review_model", "review"),
+                ("agents.default_subagent_model", "agents"),
+            ] {
+                args.push("-c".into());
+                args.push(format!(
+                    "{key}={}",
+                    toml_string(model_for_slot(&models.slots, slot, model))
+                ));
+            }
             args
         }
         Harness::Claude => vec![
@@ -687,13 +881,30 @@ pub fn command_arguments(
             "--provider".into(),
             "astraflow".into(),
         ],
-        Harness::Pi | Harness::PrimeAgent => vec![
-            "--no-extensions".into(),
-            "--provider".into(),
-            "astraflow".into(),
-            "--model".into(),
-            model.into(),
-        ],
+        Harness::Pi | Harness::PrimeAgent => {
+            let mut configured = vec![
+                "--no-extensions".into(),
+                "--provider".into(),
+                "astraflow".into(),
+                "--model".into(),
+                model.into(),
+            ];
+            if !models.cycle.is_empty() {
+                let mut cycle = vec![format!("astraflow/{model}")];
+                for item in &models.cycle {
+                    let qualified = format!("astraflow/{item}");
+                    if !cycle
+                        .iter()
+                        .any(|value| value.eq_ignore_ascii_case(&qualified))
+                    {
+                        cycle.push(qualified);
+                    }
+                }
+                configured.push("--models".into());
+                configured.push(cycle.join(","));
+            }
+            configured
+        }
         Harness::Dsh => patch_path
             .map(|path| {
                 let mut profile = "headless";
@@ -730,7 +941,12 @@ pub fn command_arguments(
     configured
 }
 
-fn configure_grok(endpoint: &str, model: &str, isolated_dir: Option<&Path>) -> Result<()> {
+fn configure_grok(
+    endpoint: &str,
+    model: &str,
+    models: &BTreeMap<String, String>,
+    isolated_dir: Option<&Path>,
+) -> Result<()> {
     let dir = isolated_dir
         .map(PathBuf::from)
         .or_else(|| env::var_os("GROK_HOME").map(PathBuf::from))
@@ -748,12 +964,39 @@ fn configure_grok(endpoint: &str, model: &str, isolated_dir: Option<&Path>) -> R
     if !document.get("model").is_some_and(Item::is_table) {
         document["model"] = Item::Table(Table::new());
     }
-    let mut astraflow = Table::new();
-    astraflow["model"] = value(model);
-    astraflow["base_url"] = value(format!("{}/v1", endpoint.trim_end_matches('/')));
-    astraflow["env_key"] = value("ASTRAFLOW_MODELVERSE_API_KEY");
-    astraflow["api_backend"] = value("chat_completions");
-    document["model"]["astraflow"] = Item::Table(astraflow);
+    let model_table = document["model"]
+        .as_table_mut()
+        .expect("model was initialized as a table");
+    model_table.retain(|name, _| !name.starts_with("astraflow"));
+    for (index, selected) in unique_models(model, models).into_iter().enumerate() {
+        let mut astraflow = Table::new();
+        astraflow["model"] = value(selected);
+        astraflow["base_url"] = value(format!("{}/v1", endpoint.trim_end_matches('/')));
+        astraflow["env_key"] = value("ASTRAFLOW_MODELVERSE_API_KEY");
+        astraflow["api_backend"] = value("chat_completions");
+        let alias = if index == 0 {
+            "astraflow".to_owned()
+        } else {
+            format!("astraflow_slot_{index}")
+        };
+        model_table.insert(&alias, Item::Table(astraflow));
+    }
+    if !document.get("subagents").is_some_and(Item::is_table) {
+        document["subagents"] = Item::Table(Table::new());
+    }
+    if !document["subagents"]
+        .get("models")
+        .is_some_and(Item::is_table)
+    {
+        document["subagents"]["models"] = Item::Table(Table::new());
+    }
+    for (agent, slot) in [
+        ("general-purpose", "general"),
+        ("explore", "explore"),
+        ("plan", "plan"),
+    ] {
+        document["subagents"]["models"][agent] = value(model_for_slot(models, slot, model));
+    }
     write_config(&path, document.to_string().as_bytes())
 }
 
@@ -761,6 +1004,7 @@ fn configure_pi_like(
     prime: bool,
     endpoint: &str,
     model: &str,
+    cycle: &[String],
     isolated_dir: Option<&Path>,
 ) -> Result<()> {
     let env_name = if prime {
@@ -802,6 +1046,27 @@ fn configure_pi_like(
     } else {
         "$ASTRAFLOW_MODELVERSE_API_KEY"
     };
+    let mut configured_models = vec![model.to_owned()];
+    for item in cycle {
+        if !configured_models
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(item))
+        {
+            configured_models.push(item.clone());
+        }
+    }
+    let configured_models: Vec<Value> = configured_models
+        .iter()
+        .map(|id| {
+            json!({
+                "id": id,
+                "name": id,
+                "input": ["text"],
+                "contextWindow": 128000,
+                "maxTokens": 16384
+            })
+        })
+        .collect();
     providers.insert(
         "astraflow".into(),
         json!({
@@ -809,19 +1074,13 @@ fn configure_pi_like(
             "api": "openai-completions",
             "apiKey": api_key_reference,
             "authHeader": true,
-            "models": [{
-                "id": model,
-                "name": model,
-                "input": ["text"],
-                "contextWindow": 128000,
-                "maxTokens": 16384
-            }]
+            "models": configured_models
         }),
     );
     write_config(&path, &serde_json::to_vec_pretty(&root)?)
 }
 
-fn codex_catalog(model: &str) -> Result<Option<NamedTempFile>> {
+fn codex_catalog(models: &[&str]) -> Result<Option<NamedTempFile>> {
     const BUNDLED_MODELS_0_147: &[&str] = &[
         "gpt-5.6-sol",
         "gpt-5.6-terra",
@@ -832,12 +1091,17 @@ fn codex_catalog(model: &str) -> Result<Option<NamedTempFile>> {
         "gpt-5.2",
         "codex-auto-review",
     ];
-    if BUNDLED_MODELS_0_147.contains(&model) {
+    let custom: Vec<_> = models
+        .iter()
+        .copied()
+        .filter(|model| !BUNDLED_MODELS_0_147.contains(model))
+        .collect();
+    if custom.is_empty() {
         return Ok(None);
     }
     let mut file = NamedTempFile::new().context("create temporary Codex model catalog")?;
     let catalog = json!({
-        "models": [{
+        "models": custom.into_iter().map(|model| json!({
             "slug": model,
             "display_name": model,
             "description": "AstraFlow ModelVerse Responses model",
@@ -868,7 +1132,7 @@ fn codex_catalog(model: &str) -> Result<Option<NamedTempFile>> {
             "supports_search_tool": false,
             "use_responses_lite": false,
             "base_instructions": "You are Codex, a coding agent. Work carefully in the user's repository and follow the user's instructions."
-        }]
+        })).collect::<Vec<_>>()
     });
     use std::io::Write;
     file.write_all(&serde_json::to_vec_pretty(&catalog)?)?;
@@ -876,13 +1140,26 @@ fn codex_catalog(model: &str) -> Result<Option<NamedTempFile>> {
     Ok(Some(file))
 }
 
-fn dsh_patch(endpoint: &str, model: &str) -> Result<NamedTempFile> {
+fn dsh_patch(
+    endpoint: &str,
+    model: &str,
+    models: &BTreeMap<String, String>,
+) -> Result<NamedTempFile> {
     let mut file = NamedTempFile::new()?;
+    let catalog = unique_models(model, models)
+        .into_iter()
+        .map(|id| format!("          - id: {}", yaml_string(id)))
+        .collect::<Vec<_>>()
+        .join("\n");
     let payload = format!(
-        "- id: settings\n  disabled: true\n\n- id: agent-default-model\n  config:\n    provider: astraflow\n    model: {}\n\n- id: llm-pi-ai\n  config:\n    providers:\n      astraflow:\n        displayName: AstraFlow ModelVerse\n        apiKeyEnv: ASTRAFLOW_MODELVERSE_API_KEY\n        api: openai-completions\n        baseURL: {}\n        models:\n          - id: {}\n",
+        "- id: settings\n  disabled: true\n\n- id: agent-default-model\n  config:\n    provider: astraflow\n    model: {}\n\n- id: session-title-llm\n  config:\n    targetWords: 5\n    targetCjkCharacters: 10\n    maxInputBytes: 4096\n    maxOutputTokens: 64\n    timeoutMs: 60000\n    provider: astraflow\n    model: {}\n\n- id: compaction-basic\n  config:\n    summarizationProvider: astraflow\n    summarizationModel: {}\n\n- id: tool-subagent\n  config:\n    provider: spawn\n    toolName: subagent\n    backgroundMode: continuable\n    agentOptions:\n      provider: astraflow\n      model: {}\n\n- id: tool-subagent-fork\n  config:\n    provider: fork\n    toolName: subagent_fork\n    backgroundMode: one-shot\n    agentOptions:\n      provider: astraflow\n      model: {}\n\n- id: llm-pi-ai\n  config:\n    providers:\n      astraflow:\n        displayName: AstraFlow ModelVerse\n        apiKeyEnv: ASTRAFLOW_MODELVERSE_API_KEY\n        api: openai-completions\n        baseURL: {}\n        models:\n{}\n",
         yaml_string(model),
+        yaml_string(model_for_slot(models, "title", model)),
+        yaml_string(model_for_slot(models, "compaction", model)),
+        yaml_string(model_for_slot(models, "spawn", model)),
+        yaml_string(model_for_slot(models, "fork", model)),
         yaml_string(&format!("{}/v1", endpoint.trim_end_matches('/'))),
-        yaml_string(model)
+        catalog,
     );
     use std::io::Write;
     file.write_all(payload.as_bytes())?;
@@ -996,6 +1273,46 @@ mod tests {
     }
 
     #[test]
+    fn claude_routes_every_picker_slot_independently() {
+        let cred = credential();
+        let models = BTreeMap::from([
+            ("fable".into(), "claude-fable-slot".into()),
+            ("opus".into(), "claude-opus-slot".into()),
+            ("sonnet".into(), "claude-sonnet-slot".into()),
+            ("haiku".into(), "claude-haiku-slot".into()),
+            ("agents".into(), "claude-agent-slot".into()),
+        ]);
+        let env = environment_with_models(
+            Harness::Claude,
+            &cred.api_key,
+            &cred.endpoint,
+            "claude-main-slot",
+            &models,
+        );
+        assert_eq!(env.values["ANTHROPIC_MODEL"], "claude-main-slot");
+        assert_eq!(
+            env.values["ANTHROPIC_DEFAULT_FABLE_MODEL"],
+            "claude-fable-slot"
+        );
+        assert_eq!(
+            env.values["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "claude-opus-slot"
+        );
+        assert_eq!(
+            env.values["ANTHROPIC_DEFAULT_SONNET_MODEL"],
+            "claude-sonnet-slot"
+        );
+        assert_eq!(
+            env.values["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+            "claude-haiku-slot"
+        );
+        assert_eq!(
+            env.values["CLAUDE_CODE_SUBAGENT_MODEL"],
+            "claude-agent-slot"
+        );
+    }
+
+    #[test]
     fn opencode_content_is_the_last_layer_and_selects_model() {
         let cred = credential();
         let env = environment(
@@ -1026,6 +1343,37 @@ mod tests {
     }
 
     #[test]
+    fn opencode_registers_and_routes_all_agent_models() {
+        let cred = credential();
+        let models = BTreeMap::from([
+            ("small".into(), "small-slot".into()),
+            ("build".into(), "build-slot".into()),
+            ("plan".into(), "plan-slot".into()),
+            ("general".into(), "general-slot".into()),
+            ("explore".into(), "explore-slot".into()),
+            ("compaction".into(), "compact-slot".into()),
+            ("title".into(), "title-slot".into()),
+            ("summary".into(), "summary-slot".into()),
+        ]);
+        let env = environment_with_models(
+            Harness::Opencode,
+            &cred.api_key,
+            &cred.endpoint,
+            "main-slot",
+            &models,
+        );
+        let config: Value = serde_json::from_str(&env.values["OPENCODE_CONFIG_CONTENT"]).unwrap();
+        assert_eq!(config["small_model"], "astraflow/small-slot");
+        assert_eq!(
+            config["agent"]["compaction"]["model"],
+            "astraflow/compact-slot"
+        );
+        for id in ["main-slot", "small-slot", "build-slot", "summary-slot"] {
+            assert_eq!(config["provider"]["astraflow"]["models"][id]["name"], id);
+        }
+    }
+
+    #[test]
     fn pi_supports_legacy_and_current_environment_resolution() {
         let cred = credential();
         let env = environment(Harness::Pi, &cred.api_key, &cred.endpoint, "chat-model");
@@ -1034,7 +1382,82 @@ mod tests {
     }
 
     #[test]
+    fn pi_cycle_pool_is_registered_and_passed_to_the_real_cli_contract() {
+        let dir = tempfile::tempdir().unwrap();
+        configure_pi_like(
+            false,
+            "https://api.modelverse.cn",
+            "main-slot",
+            &["cycle-a".into(), "cycle-b".into()],
+            Some(dir.path()),
+        )
+        .unwrap();
+        let config: Value =
+            serde_json::from_slice(&fs::read(dir.path().join("models.json")).unwrap()).unwrap();
+        assert_eq!(
+            config["providers"]["astraflow"]["models"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        let models = HarnessModelSettings {
+            slots: BTreeMap::from([("default".into(), "main-slot".into())]),
+            cycle: vec!["cycle-a".into(), "cycle-b".into()],
+        };
+        let args = command_arguments_with_models(
+            Harness::Pi,
+            "https://api.modelverse.cn",
+            "main-slot",
+            &[],
+            None,
+            &models,
+        );
+        assert!(args.windows(2).any(|pair| {
+            pair == [
+                "--models",
+                "astraflow/main-slot,astraflow/cycle-a,astraflow/cycle-b",
+            ]
+        }));
+    }
+
+    #[test]
+    fn codex_picker_routes_review_and_subagent_models() {
+        let models = HarnessModelSettings {
+            slots: BTreeMap::from([
+                ("review".into(), "review-slot".into()),
+                ("agents".into(), "agent-slot".into()),
+            ]),
+            cycle: Vec::new(),
+        };
+        let args = command_arguments_with_models(
+            Harness::Codex,
+            "https://api.modelverse.cn",
+            "main-slot",
+            &[],
+            None,
+            &models,
+        );
+        assert!(args.iter().any(|arg| arg == "review_model=\"review-slot\""));
+        assert!(
+            args.iter()
+                .any(|arg| arg == "agents.default_subagent_model=\"agent-slot\"")
+        );
+    }
+
+    #[test]
     fn routing_conflicts_are_rejected_before_launch() {
+        assert!(
+            validate_passthrough_args(
+                Harness::Claude,
+                &["--model".into(), "hostile".into(), "--print".into()]
+            )
+            .is_err()
+        );
+        assert!(
+            validate_passthrough_args(Harness::Claude, &["--settings=hostile.json".into()])
+                .is_err()
+        );
         assert!(
             validate_passthrough_args(
                 Harness::Codex,
@@ -1053,8 +1476,8 @@ mod tests {
 
     #[test]
     fn unknown_codex_model_gets_a_text_only_catalog() {
-        assert!(codex_catalog("gpt-5.6-sol").unwrap().is_none());
-        let catalog = codex_catalog("future-responses-model").unwrap().unwrap();
+        assert!(codex_catalog(&["gpt-5.6-sol"]).unwrap().is_none());
+        let catalog = codex_catalog(&["future-responses-model"]).unwrap().unwrap();
         let value: Value = serde_json::from_slice(&fs::read(catalog.path()).unwrap()).unwrap();
         assert_eq!(value["models"][0]["slug"], "future-responses-model");
         assert_eq!(value["models"][0]["input_modalities"], json!(["text"]));
@@ -1069,7 +1492,13 @@ mod tests {
             "[model.astraflow]\napi_key='hostile'\n[model.astraflow.extra_headers]\nAuthorization='Bearer hostile'\n",
         )
         .unwrap();
-        configure_grok("https://api.modelverse.cn", "chat-model", Some(dir.path())).unwrap();
+        configure_grok(
+            "https://api.modelverse.cn",
+            "chat-model",
+            &BTreeMap::new(),
+            Some(dir.path()),
+        )
+        .unwrap();
         let document = fs::read_to_string(dir.path().join("config.toml"))
             .unwrap()
             .parse::<DocumentMut>()
@@ -1099,10 +1528,64 @@ mod tests {
     }
 
     #[test]
+    fn grok_registers_and_routes_auxiliary_and_subagent_models() {
+        let dir = tempfile::tempdir().unwrap();
+        let models = BTreeMap::from([
+            ("summary".into(), "summary-slot".into()),
+            ("prompt".into(), "prompt-slot".into()),
+            ("general".into(), "general-slot".into()),
+            ("explore".into(), "explore-slot".into()),
+            ("plan".into(), "plan-slot".into()),
+        ]);
+        configure_grok(
+            "https://api.modelverse.cn",
+            "main-slot",
+            &models,
+            Some(dir.path()),
+        )
+        .unwrap();
+        let document = fs::read_to_string(dir.path().join("config.toml"))
+            .unwrap()
+            .parse::<DocumentMut>()
+            .unwrap();
+        assert_eq!(
+            document["subagents"]["models"]["general-purpose"].as_str(),
+            Some("general-slot")
+        );
+        assert!(
+            document["model"]
+                .as_table()
+                .unwrap()
+                .iter()
+                .any(|(_, item)| item["model"].as_str() == Some("summary-slot"))
+        );
+        let cred = credential();
+        let env = environment_with_models(
+            Harness::Grok,
+            &cred.api_key,
+            &cred.endpoint,
+            "main-slot",
+            &models,
+        );
+        assert_eq!(env.values["GROK_SESSION_SUMMARY_MODEL"], "summary-slot");
+        assert_eq!(env.values["GROK_PROMPT_SUGGESTIONS_MODEL"], "prompt-slot");
+    }
+
+    #[test]
     fn dsh_uses_managed_profiles_and_rejects_user_layers() {
-        let patch = dsh_patch("https://api.modelverse.cn", "chat-model").unwrap();
+        let models = BTreeMap::from([
+            ("title".into(), "title-slot".into()),
+            ("compaction".into(), "compact-slot".into()),
+            ("spawn".into(), "spawn-slot".into()),
+            ("fork".into(), "fork-slot".into()),
+        ]);
+        let patch = dsh_patch("https://api.modelverse.cn", "chat-model", &models).unwrap();
         let content = fs::read_to_string(patch.path()).unwrap();
         assert!(content.contains("- id: settings\n  disabled: true"));
+        assert!(content.contains("model: \"title-slot\""));
+        assert!(content.contains("summarizationModel: \"compact-slot\""));
+        assert!(content.contains("model: \"spawn-slot\""));
+        assert!(content.contains("model: \"fork-slot\""));
         let args = command_arguments(
             Harness::Dsh,
             "https://api.modelverse.cn",

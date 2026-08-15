@@ -3,9 +3,12 @@ use astraflow::cli::{
     Cli, Command as CliCommand, CompletionShell, DshLaunchArgs, HarnessCommand, HarnessLaunchArgs,
     Language, ModelVerseRegion, SELECT_MODEL_INTERACTIVELY,
 };
-use astraflow::config::{self, Credential, OAuthProvider, ResolvedCredential};
-use astraflow::harness::{self, Harness};
+use astraflow::config::{
+    self, Credential, HarnessModelSettings, OAuthProvider, ResolvedCredential,
+};
+use astraflow::harness::{self, DEFAULT_MODEL_SLOT, Harness};
 use astraflow::i18n::{BANNER, Messages};
+use astraflow::model_picker::ModelPicker;
 use astraflow::output::OutputMode;
 use astraflow::{modelverse, oauth, proxy, ucloud};
 use clap::{CommandFactory, Parser, error::ErrorKind};
@@ -373,13 +376,13 @@ async fn launch(
     cwd: &Path,
 ) -> Result<i32> {
     let credential = require_credential(cwd)?;
-    let model = resolve_launch_model(harness, &credential, args.model, mode).await?;
-    let status = harness::launch(
+    let models = resolve_launch_models(harness, &credential, args.model, mode).await?;
+    let status = harness::launch_with_models(
         harness,
         &credential,
         args.binary.as_deref(),
         &args.args,
-        model.as_deref(),
+        &models,
     )
     .await?;
     Ok(status.code().unwrap_or(1))
@@ -387,33 +390,48 @@ async fn launch(
 
 async fn launch_dsh(args: DshLaunchArgs, mode: OutputMode, cwd: &Path) -> Result<i32> {
     let credential = require_credential(cwd)?;
-    let model = resolve_launch_model(Harness::Dsh, &credential, args.model, mode).await?;
+    let models = resolve_launch_models(Harness::Dsh, &credential, args.model, mode).await?;
     let mut passthrough = vec!["--profile".to_owned(), args.profile.as_str().to_owned()];
     passthrough.extend(args.args);
-    let status = harness::launch(
+    let status = harness::launch_with_models(
         Harness::Dsh,
         &credential,
         args.binary.as_deref(),
         &passthrough,
-        model.as_deref(),
+        &models,
     )
     .await?;
     Ok(status.code().unwrap_or(1))
 }
 
-async fn resolve_launch_model(
+async fn resolve_launch_models(
     harness: Harness,
     credential: &Credential,
     requested: Option<String>,
     mode: OutputMode,
-) -> Result<Option<String>> {
-    if requested.as_deref() != Some(SELECT_MODEL_INTERACTIVELY) {
-        return Ok(requested);
+) -> Result<HarnessModelSettings> {
+    if let Some(model) = requested
+        .as_deref()
+        .filter(|model| *model != SELECT_MODEL_INTERACTIVELY)
+    {
+        return Ok(HarnessModelSettings {
+            slots: std::collections::BTreeMap::from([(
+                DEFAULT_MODEL_SLOT.to_owned(),
+                model.trim().to_owned(),
+            )]),
+            cycle: Vec::new(),
+        });
     }
-    if mode == OutputMode::Json || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        bail!(
-            "--model without a value requires an interactive terminal; use `--model <MODEL>` in scripts"
-        );
+    let explicitly_requested = requested.as_deref() == Some(SELECT_MODEL_INTERACTIVELY);
+    let interactive =
+        mode == OutputMode::Human && io::stdin().is_terminal() && io::stderr().is_terminal();
+    if !interactive {
+        if explicitly_requested {
+            bail!(
+                "--model without a value requires an interactive terminal; use `--model <MODEL>` in scripts"
+            );
+        }
+        return config::load_harness_models(harness.name());
     }
     let client = http_client()?;
     let available = modelverse::list_models(&client, &credential.endpoint, &credential.api_key)
@@ -423,29 +441,60 @@ async fn resolve_launch_model(
     if compatible.is_empty() {
         bail!("no compatible model is available for {}", harness.name());
     }
-    let query = Input::<String>::with_theme(&ColorfulTheme::default())
-        .with_prompt("Search models / 搜索模型（留空显示全部）")
-        .allow_empty(true)
-        .interact_text()?;
-    let query = query.trim().to_ascii_lowercase();
-    let mut filtered: Vec<_> = compatible
-        .iter()
-        .filter(|model| query.is_empty() || model.id.to_ascii_lowercase().contains(&query))
-        .collect();
-    if filtered.is_empty() {
-        bail!("no model matches `{query}`");
+    let mut defaults = config::load_harness_models(harness.name())?;
+    let protocol_default = match harness {
+        Harness::Claude => credential.models.anthropic.as_deref(),
+        Harness::Codex => credential.models.responses.as_deref(),
+        _ => compatible
+            .iter()
+            .find(|model| {
+                model
+                    .id
+                    .eq_ignore_ascii_case(modelverse::PREFERRED_CHAT_MODEL)
+            })
+            .map(|model| model.id.as_str())
+            .or(credential.models.chat_completions.as_deref()),
     }
-    filtered.sort_by_key(|model| !model.id.eq_ignore_ascii_case(&query));
-    let choices: Vec<_> = filtered
-        .iter()
-        .map(|model| format!("{}  —  {}", model.id, modelverse::price_summary(model)))
-        .collect();
-    let selected = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Model / 模型")
-        .items(&choices)
-        .default(0)
-        .interact()?;
-    Ok(Some(filtered[selected].id.clone()))
+    .filter(|id| {
+        compatible
+            .iter()
+            .any(|model| model.id.eq_ignore_ascii_case(id))
+    })
+    .unwrap_or(&compatible[0].id)
+    .to_owned();
+    for slot in harness::model_slots(harness)
+        .into_iter()
+        .filter(|slot| !slot.multiple)
+    {
+        let slot_default = if harness == Harness::Claude
+            && matches!(slot.key, "fable" | "opus" | "sonnet" | "haiku")
+        {
+            compatible
+                .iter()
+                .find(|model| {
+                    model
+                        .id
+                        .to_ascii_lowercase()
+                        .contains(&format!("-{}-", slot.key))
+                        || model
+                            .id
+                            .to_ascii_lowercase()
+                            .ends_with(&format!("-{}", slot.key))
+                })
+                .map(|model| model.id.clone())
+                .unwrap_or_else(|| protocol_default.clone())
+        } else {
+            protocol_default.clone()
+        };
+        defaults
+            .slots
+            .entry(slot.key.to_owned())
+            .or_insert(slot_default);
+    }
+    let slots = harness::model_slots(harness);
+    let harness_name = harness.name().to_owned();
+    ModelPicker::new(compatible, slots, defaults)
+        .run(|models| config::save_harness_models(&harness_name, models))
 }
 
 fn harness_doctor(mode: OutputMode, cwd: &Path) -> Result<i32> {

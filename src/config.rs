@@ -3,6 +3,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use directories::ProjectDirs;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -11,6 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const CREDENTIALS_FILE: &str = "credentials.json";
 const SETTINGS_FILE: &str = "config.json";
+const CURRENT_CREDENTIAL_VERSION: u8 = 2;
 
 #[derive(Debug, Clone)]
 pub struct Credential {
@@ -120,6 +122,16 @@ struct StoredOAuthTokens {
 struct Settings {
     #[serde(default)]
     language: Option<Language>,
+    #[serde(default)]
+    harness_models: BTreeMap<String, HarnessModelSettings>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HarnessModelSettings {
+    #[serde(default)]
+    pub slots: BTreeMap<String, String>,
+    #[serde(default)]
+    pub cycle: Vec<String>,
 }
 
 fn default_endpoint() -> String {
@@ -229,11 +241,23 @@ fn read_credential(path: &Path) -> Result<Credential> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     let stored: StoredCredential =
         serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
-    if stored.version != 1 || stored.api_key.trim().is_empty() {
+    if !matches!(stored.version, 1 | CURRENT_CREDENTIAL_VERSION) || stored.api_key.trim().is_empty()
+    {
         bail!(
             "{} is not a valid AstraFlow credential file",
             path.display()
         );
+    }
+    let mut models = stored.models;
+    if stored.version == 1
+        && models.chat_completions.as_ref().is_some_and(|model| {
+            let model = model.to_ascii_lowercase();
+            model.starts_with("gemini-")
+                || model.starts_with("google/gemini-")
+                || model.starts_with("claude-")
+        })
+    {
+        models.chat_completions = Some(crate::modelverse::PREFERRED_CHAT_MODEL.to_owned());
     }
     Ok(Credential {
         api_key: SecretString::from(stored.api_key),
@@ -242,7 +266,7 @@ fn read_credential(path: &Path) -> Result<Credential> {
         project_id: stored.project_id,
         endpoint: stored.endpoint.trim_end_matches('/').to_owned(),
         region: stored.region,
-        models: stored.models,
+        models,
         oauth: stored.oauth.map(|oauth| OAuthTokens {
             provider: oauth.provider,
             access_token: SecretString::from(oauth.access_token),
@@ -256,7 +280,7 @@ fn read_credential(path: &Path) -> Result<Credential> {
 
 pub fn save_credential(path: &Path, credential: &Credential) -> Result<()> {
     let stored = StoredCredential {
-        version: 1,
+        version: CURRENT_CREDENTIAL_VERSION,
         api_key: credential.api_key.expose_secret().to_owned(),
         key_id: credential.key_id.clone(),
         key_name: credential.key_name.clone(),
@@ -280,21 +304,36 @@ pub fn save_credential(path: &Path, credential: &Credential) -> Result<()> {
 }
 
 pub fn load_language() -> Result<Option<Language>> {
-    let path = settings_path()?;
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let settings: Settings = serde_json::from_slice(&fs::read(&path)?)?;
-    Ok(settings.language)
+    Ok(read_settings(&settings_path()?)?.language)
 }
 
 pub fn save_language(language: Language) -> Result<()> {
-    write_private_json(
-        &settings_path()?,
-        &Settings {
-            language: Some(language),
-        },
-    )
+    let path = settings_path()?;
+    let mut settings = read_settings(&path)?;
+    settings.language = Some(language);
+    write_private_json(&path, &settings)
+}
+
+pub fn load_harness_models(harness: &str) -> Result<HarnessModelSettings> {
+    Ok(read_settings(&settings_path()?)?
+        .harness_models
+        .remove(harness)
+        .unwrap_or_default())
+}
+
+pub fn save_harness_models(harness: &str, models: HarnessModelSettings) -> Result<()> {
+    let path = settings_path()?;
+    let mut settings = read_settings(&path)?;
+    settings.harness_models.insert(harness.to_owned(), models);
+    write_private_json(&path, &settings)
+}
+
+fn read_settings(path: &Path) -> Result<Settings> {
+    if !path.is_file() {
+        return Ok(Settings::default());
+    }
+    ensure_safe_file(path)?;
+    serde_json::from_slice(&fs::read(path)?).with_context(|| format!("parse {}", path.display()))
 }
 
 pub fn repair(cwd: &Path) -> Result<Vec<PathBuf>> {
@@ -411,5 +450,64 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn language_and_harness_defaults_share_one_settings_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        let mut settings = Settings {
+            language: Some(Language::Zh),
+            ..Settings::default()
+        };
+        settings.harness_models.insert(
+            "claude".to_owned(),
+            HarnessModelSettings {
+                slots: BTreeMap::from([
+                    ("default".to_owned(), "claude-opus-5".to_owned()),
+                    ("haiku".to_owned(), "claude-haiku-4-5".to_owned()),
+                ]),
+                cycle: Vec::new(),
+            },
+        );
+        write_private_json(&path, &settings).unwrap();
+        let loaded = read_settings(&path).unwrap();
+        assert_eq!(loaded.language, Some(Language::Zh));
+        assert_eq!(
+            loaded.harness_models["claude"].slots["default"],
+            "claude-opus-5"
+        );
+    }
+
+    #[test]
+    fn legacy_gemini_chat_default_migrates_to_deepseek_flash() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("credentials.json");
+        let stored = StoredCredential {
+            version: 1,
+            api_key: "test-key".into(),
+            key_id: None,
+            key_name: None,
+            project_id: None,
+            endpoint: "https://api.modelverse.cn".into(),
+            region: ModelVerseRegion::China,
+            models: ModelSelection {
+                chat_completions: Some("gemini-3.7-flash".into()),
+                responses: Some("gpt-5.6-luna".into()),
+                anthropic: Some("claude-opus-5".into()),
+            },
+            oauth: None,
+        };
+        write_private_json(&path, &stored).unwrap();
+        let credential = read_credential(&path).unwrap();
+        assert_eq!(
+            credential.models.chat_completions.as_deref(),
+            Some(crate::modelverse::PREFERRED_CHAT_MODEL)
+        );
+        assert_eq!(credential.models.responses.as_deref(), Some("gpt-5.6-luna"));
+        assert_eq!(
+            credential.models.anthropic.as_deref(),
+            Some("claude-opus-5")
+        );
     }
 }

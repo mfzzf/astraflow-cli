@@ -6,6 +6,10 @@
 - Kept `headless` as the default DSH profile and continued rejecting custom profiles and user-supplied patches that could replace AstraFlow routing.
 - Restored the persistent self-hosted runner's workspace ownership after containerized Linux release builds.
 - Made a value-less `--model` open a searchable interactive model selector with live ModelVerse pricing; explicit IDs such as `glm-5.2` and `deepseek-v4-pro-0813` remain supported.
+- Open the model picker for every interactive harness launch when `--model` is omitted, with direct search, live text-token pricing, Tab/Shift+Tab and Left/Right role switching, Up/Down selection, `D` to save defaults, and Enter to launch.
+- Added verified multi-model role routing for Claude Code, Codex, Grok Build, OpenCode, DSH, plus a multi-select Ctrl+P cycle pool for Pi and Prime Agent; unsupported or media-only roles remain hidden.
+- Prefer `deepseek-v4-flash-0731` for every Chat Completions harness when available, while retaining protocol-compatible Responses models for Codex and Anthropic Messages models for Claude Code.
+- Reject inner Claude/OpenCode model and Claude settings/fallback overrides that could bypass AstraFlow routing.
 
 ## 0.2.7 — 2026-08-15
 

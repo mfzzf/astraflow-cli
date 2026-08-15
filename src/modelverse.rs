@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
+pub const PREFERRED_CHAT_MODEL: &str = "deepseek-v4-flash-0731";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvailableModel {
     pub id: String,
@@ -113,12 +115,7 @@ pub fn price_summary(model: &AvailableModel) -> String {
         .pricing
         .iter()
         .map(|rate| {
-            let item = match rate.charge_item.as_str() {
-                "input" => "input",
-                "cache" => "cache",
-                item if item.contains("output") => "output",
-                item => item,
-            };
+            let item = normalized_text_charge_item(&rate.charge_item).unwrap_or("tokens");
             let currency = if rate.currency.eq_ignore_ascii_case("CNY") {
                 "¥"
             } else {
@@ -145,6 +142,7 @@ fn parse_pricing(entry: &Value) -> Vec<ModelRate> {
         })
         .filter_map(|rate| {
             let charge_item = rate.get("ChargeItem")?.as_str()?.to_owned();
+            normalized_text_charge_item(&charge_item)?;
             let price = rate.get("Price").map(|value| match value {
                 Value::String(value) => value.clone(),
                 value => value.to_string(),
@@ -170,6 +168,22 @@ fn parse_pricing(entry: &Value) -> Vec<ModelRate> {
         .collect()
 }
 
+fn normalized_text_charge_item(item: &str) -> Option<&'static str> {
+    let item = item.to_ascii_lowercase();
+    if item.contains("image") || item.contains("video") || item.contains("audio") {
+        return None;
+    }
+    if item.contains("cache") {
+        Some("cache")
+    } else if item == "input" || item.contains("input_text") || item.contains("input_token") {
+        Some("input")
+    } else if item == "output" || item.contains("output_text") || item.contains("output_token") {
+        Some("output")
+    } else {
+        None
+    }
+}
+
 pub fn select_models(available: &[AvailableModel], catalog: &[SquareModel]) -> ModelSelection {
     let chat_candidates: Vec<&AvailableModel> = available
         .iter()
@@ -188,10 +202,18 @@ pub fn select_models(available: &[AvailableModel], catalog: &[SquareModel]) -> M
         .collect();
 
     ModelSelection {
-        chat_completions: select_latest(&chat_candidates),
+        chat_completions: select_preferred(&chat_candidates, PREFERRED_CHAT_MODEL),
         responses: select_latest(&response_candidates),
         anthropic: select_latest(&anthropic_candidates),
     }
+}
+
+fn select_preferred(models: &[&AvailableModel], preferred: &str) -> Option<String> {
+    models
+        .iter()
+        .find(|model| model.id.eq_ignore_ascii_case(preferred))
+        .map(|model| model.id.clone())
+        .or_else(|| select_latest(models))
 }
 
 fn model_labels<'a>(model: &'a str, catalog: &'a [SquareModel]) -> impl Iterator<Item = &'a str> {
@@ -397,6 +419,25 @@ mod tests {
     }
 
     #[test]
+    fn picker_pricing_hides_image_video_and_audio_charges() {
+        let value = json!({
+            "pricing": [{
+                "Rates": [
+                    {"ChargeItem":"input","Price":1,"Currency":"CNY","UnitEn":"Million Tokens"},
+                    {"ChargeItem":"input_image_count","Price":0.2,"Currency":"CNY","UnitEn":"Image"},
+                    {"ChargeItem":"input_video_duration","Price":0.8,"Currency":"CNY","UnitEn":"Second"}
+                ]
+            }]
+        });
+        let model = AvailableModel {
+            id: "multimodal-chat".to_owned(),
+            created: 1,
+            pricing: parse_pricing(&value),
+        };
+        assert_eq!(price_summary(&model), "input ¥1/Million Tokens");
+    }
+
+    #[test]
     fn interactive_inventory_is_filtered_for_each_harness_protocol() {
         let models = inventory(&[
             ("claude-opus-5", 3),
@@ -507,17 +548,17 @@ mod tests {
     }
 
     #[test]
-    fn each_protocol_selects_its_newest_eligible_model() {
+    fn chat_prefers_astraflow_default_while_other_protocols_use_latest() {
         let models = inventory(&[
             ("gemini-3.7-flash", 400),
             ("claude-opus-5", 300),
             ("gpt-5.6-luna", 200),
-            ("deepseek-v4-pro", 100),
+            ("deepseek-v4-flash-0731", 100),
         ]);
         let selected = select_models(&models, &[]);
         assert_eq!(
             selected.chat_completions.as_deref(),
-            Some("gemini-3.7-flash")
+            Some("deepseek-v4-flash-0731")
         );
         assert_eq!(selected.responses.as_deref(), Some("gpt-5.6-luna"));
         assert_eq!(selected.anthropic.as_deref(), Some("claude-opus-5"));

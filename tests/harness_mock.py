@@ -51,6 +51,16 @@ class Handler(BaseHTTPRequestHandler):
         with open(LOG, "a", encoding="utf-8") as output:
             output.write(json.dumps(record) + "\n")
 
+        authorization = record["authorization"] or record["x_api_key"]
+        if authorization not in ("Bearer offline-sentinel-key", "offline-sentinel-key"):
+            self._json(401, {
+                "error": {
+                    "type": "authentication_error",
+                    "message": "Validate Certification failed",
+                }
+            })
+            return
+
         if path == "/v1/messages":
             self._anthropic(payload)
         elif path in ("/v1/responses", "/v1/response"):

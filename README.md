@@ -63,7 +63,7 @@ The first interactive login asks for English or Chinese and one of four ModelVer
 
 Login reads the selected region's `/v1/models` endpoint to learn which model IDs the key can use. OAuth login may correlate those IDs with names and aliases from the read-only `ListUFSquareModel` catalog, but it never reads model-detail protocol metadata. `astraflow` classifies protocols locally: Claude IDs use the Anthropic Messages API, OpenAI GPT/o-series/Codex IDs can use Responses, and other conversational text models use Chat Completions. Dedicated image/video/audio generation, embedding, rerank, OCR, batch, transcription, and moderation models are excluded; vision-language chat models remain available.
 
-Within each protocol, the default is the eligible model with the newest `created` timestamp returned by the authenticated `/v1/models` response. Run `astraflow login` again to refresh saved defaults after new models are published; wrapper-level `--model` always remains the explicit override.
+For Chat Completions harnesses, AstraFlow prefers `deepseek-v4-flash-0731` whenever that exact ID is available; otherwise it falls back to the newest eligible model returned by authenticated `/v1/models`. Codex still selects a Responses-capable GPT/Codex model, and Claude Code still selects a Claude-series Anthropic Messages model because those wire protocols are not interchangeable. Wrapper-level `--model <ID>` always remains the explicit override.
 
 ModelVerse documents its Claude-compatible endpoint as `POST /v1/messages` and limits that endpoint to Claude-series models, matching the [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages/create). Every `claude-*` model family—including current Sonnet, Opus, Haiku, and Fable IDs—is therefore selected only for the Claude launcher and never assigned to an OpenAI-compatible harness.
 
@@ -90,7 +90,9 @@ The surface follows Ori's local-harness workflow:
 - `harness-doctor`, `harness list|inspect|test`, `workspace`, `vault-tunnel`, `eval`
 - global `--json`/`--agent`, `--human`/`--tty`, `--wizard`, `--lang`, `--log-level`, and `--completions`
 
-Use `--model <MODEL>` to specify an ID directly, or pass `--model` without a value to search the current Key's live model list, compare input/cache/output prices, and choose interactively. Ordinary arguments after `--` pass through to the harness:
+In an interactive terminal every harness command opens the live model picker even when `--model` is omitted. It supports direct typing to search, Up/Down to select, Tab/Shift+Tab or Left/Right to switch model roles, `D` to save the complete AstraFlow default combination, Enter to launch, and Esc to cancel. Pi and Prime also use Space to toggle multiple models in their Ctrl+P cycle pool. Prices come from the current Key's authenticated `/v1/models` response; image/video/audio charges are hidden from this text-agent picker.
+
+Use `--model <MODEL>` to bypass the picker and specify the primary model directly. A value-less `--model` explicitly requests the picker and therefore fails in a non-interactive script instead of guessing. Ordinary arguments after `--` pass through to the harness:
 
 ```bash
 astraflow codex --model gpt-5-mini -- --full-auto
@@ -100,13 +102,27 @@ astraflow pi --model
 astraflow claude -- --permission-mode plan
 ```
 
+The role tabs match each harness's real configuration surface:
+
+| Harness | Model tabs |
+| --- | --- |
+| Claude Code | Default, Fable, Opus, Sonnet, Haiku, Agents |
+| Codex | Default, Review, Agents |
+| Grok Build | Default, Summary, Prompts, General Agent, Explore Agent, Plan Agent |
+| OpenCode | Default, Small, Build, Plan, General, Explore, Compaction, Title, Summary |
+| Pi / Prime Agent | Default, Cycle Pool (multi-select) |
+| DSH | Default, Title, Compaction, Spawn Agent, Fork Agent |
+| Hermes | Default |
+
+Unsupported roles are deliberately absent: Pi and Prime compaction reuse the current model, Grok web search needs a separate hosted-search capability, and image/video roles are not exposed. Saved choices live only in AstraFlow's private settings file; launches continue to generate isolated temporary harness configuration.
+
 Provider, model, API-key, config, profile, patch, plugin, and extension flags that could replace AstraFlow routing are rejected after `--`; select the model with the outer `astraflow <harness> --model ...` option instead.
 
 DSH supports AstraFlow-managed `headless` and `web` profiles. Headless requires a task; Web starts the browser UI while keeping AstraFlow's endpoint, key, and model patch:
 
 ```bash
-astraflow dsh --model deepseek-v4-flash -- "run the tests"
-astraflow dsh --model deepseek-v4-flash --profile web
+astraflow dsh --model deepseek-v4-flash-0731 -- "run the tests"
+astraflow dsh --model deepseek-v4-flash-0731 --profile web
 ```
 
 Wrapped launches isolate every harness from conflicting local state. Codex and Grok receive temporary homes; Claude ignores user/project/local settings; OpenCode disables project configuration, default plugins, external skills, and Claude compatibility imports; Hermes uses a temporary safe-mode profile and empty managed scope; Pi and Prime use temporary agent configuration while retaining their normal session directories; DSH uses an isolated home and managed profile patch. API keys are passed through process environment only and are never written into those temporary harness files.
@@ -198,9 +214,9 @@ astraflow --lang zh login --region china
 astraflow auth
 astraflow codex
 astraflow claude
+astraflow pi  # 自动弹出模型/价格选择器，Tab 切换槽位，D 保存默认组合
 astraflow grok --model glm-5.2
 astraflow opencode --model deepseek-v4-pro-0813
-astraflow pi --model  # 搜索模型、查看价格并交互选择
 astraflow dsh --model deepseek-v4-pro-0813 --profile web
 astraflow harness-doctor
 ```

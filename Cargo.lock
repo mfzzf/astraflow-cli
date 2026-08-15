@@ -92,6 +92,7 @@ dependencies = [
  "base64",
  "clap",
  "clap_complete",
+ "console",
  "dialoguer",
  "directories",
  "futures-util",

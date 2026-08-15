@@ -95,7 +95,7 @@ impl ModelVerseRegion {
     version,
     about = "The easiest way to use AstraFlow locally.",
     long_about = "AstraFlow signs you in, selects a ModelVerse API key, and launches local coding agents with the correct provider environment.",
-    after_help = "Examples:\n  astraflow grok --model glm-5.2\n  astraflow opencode --model deepseek-v4-pro-0813\n  astraflow pi --model\n  astraflow dsh --model deepseek-v4-pro-0813 --profile web",
+    after_help = "Examples:\n  astraflow claude                         # open the role-aware model picker\n  astraflow grok --model glm-5.2           # launch an explicit model\n  astraflow opencode --model deepseek-v4-pro-0813\n  astraflow pi                              # Default + multi-select Cycle Pool\n  astraflow dsh --model deepseek-v4-flash-0731 --profile web",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -244,7 +244,7 @@ pub struct HarnessLaunchArgs {
     #[arg(long)]
     pub binary: Option<PathBuf>,
 
-    /// Select a model interactively, or provide a model ID directly
+    /// Provide a model ID directly; omit it to open the interactive role picker
     #[arg(
         long,
         num_args = 0..=1,
@@ -264,7 +264,7 @@ pub struct DshLaunchArgs {
     #[arg(long)]
     pub binary: Option<PathBuf>,
 
-    /// Select a model interactively, or provide a model ID directly
+    /// Provide a model ID directly; omit it to open the interactive role picker
     #[arg(
         long,
         num_args = 0..=1,
