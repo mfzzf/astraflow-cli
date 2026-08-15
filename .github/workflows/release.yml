@@ -20,6 +20,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build
         run: |
+          workspace_uid=$(stat -c %u "$GITHUB_WORKSPACE")
+          workspace_gid=$(stat -c %g "$GITHUB_WORKSPACE")
+          trap 'chown -R "$workspace_uid:$workspace_gid" "$GITHUB_WORKSPACE"' EXIT
           rustup target add "$TARGET"
           cargo build --release --locked --target "$TARGET"
           "target/${TARGET}/release/astraflow" --json version
@@ -42,6 +45,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build
         run: |
+          workspace_uid=$(stat -c %u "$GITHUB_WORKSPACE")
+          workspace_gid=$(stat -c %g "$GITHUB_WORKSPACE")
+          trap 'chown -R "$workspace_uid:$workspace_gid" "$GITHUB_WORKSPACE"' EXIT
           rustup target add "$TARGET"
           cargo build --release --locked --target "$TARGET"
           "target/${TARGET}/release/astraflow" --json version
