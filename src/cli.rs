@@ -45,6 +45,60 @@ pub enum ModelVerseRegion {
     Frankfurt,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderProtocol {
+    /// Provider supports Chat Completions, Responses, and Anthropic Messages
+    All,
+    /// OpenAI-compatible POST /v1/chat/completions
+    ChatCompletions,
+    /// OpenAI-compatible POST /v1/responses
+    Responses,
+    /// Anthropic-compatible POST /v1/messages
+    Anthropic,
+}
+
+impl ProviderProtocol {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All protocols / 全协议",
+            Self::ChatCompletions => "Chat Completions",
+            Self::Responses => "Responses",
+            Self::Anthropic => "Anthropic Messages",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum CustomProtocol {
+    /// OpenAI-compatible POST /v1/chat/completions
+    ChatCompletions,
+    /// OpenAI-compatible POST /v1/responses
+    Responses,
+    /// Anthropic-compatible POST /v1/messages
+    Anthropic,
+}
+
+impl From<CustomProtocol> for ProviderProtocol {
+    fn from(value: CustomProtocol) -> Self {
+        match value {
+            CustomProtocol::ChatCompletions => Self::ChatCompletions,
+            CustomProtocol::Responses => Self::Responses,
+            CustomProtocol::Anthropic => Self::Anthropic,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum ConfigMethod {
+    /// Sign in with UCloud OAuth (recommended)
+    UcloudOauth,
+    /// Use an AstraFlow API key and region
+    AstraflowKey,
+    /// Use a custom Base URL, API key, and protocol
+    Custom,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum DshProfile {
     /// Run one headless task and exit
@@ -95,10 +149,14 @@ impl ModelVerseRegion {
     version,
     about = "The easiest way to use AstraFlow locally.",
     long_about = "AstraFlow signs you in, selects a ModelVerse API key, and launches local coding agents with the correct provider environment.",
-    after_help = "Examples:\n  astraflow claude                         # open the role-aware model picker\n  astraflow grok --model glm-5.2           # launch an explicit model\n  astraflow opencode --model deepseek-v4-pro-0813\n  astraflow pi                              # Default + multi-select Cycle Pool\n  astraflow dsh --model deepseek-v4-flash-0731 --profile web",
+    after_help = "Examples:\n  astraflow config add                     # first-run provider wizard\n  astraflow config list\n  astraflow --config work claude           # choose a named config\n  astraflow claude                         # open the role-aware model picker\n  astraflow grok --model glm-5.2           # launch an explicit model\n  astraflow pi                              # Default + multi-select Cycle Pool\n  astraflow dsh --model deepseek-v4-flash-0731 --profile web",
     disable_help_subcommand = true
 )]
 pub struct Cli {
+    /// Use this named provider config for the command
+    #[arg(long, global = true, env = "ASTRAFLOW_CONFIG", value_name = "NAME")]
+    pub config: Option<String>,
+
     /// Start wizard mode for a command
     #[arg(long, global = true)]
     pub wizard: bool,
@@ -137,6 +195,9 @@ pub enum Command {
 
     /// Sign in through the browser and select a ModelVerse API key
     Login(LoginArgs),
+
+    /// Add, inspect, edit, remove, or select provider configs
+    Config(ConfigArgs),
 
     /// Report whether an AstraFlow credential resolves and where it comes from
     Auth,
@@ -201,6 +262,14 @@ pub enum Command {
 
 #[derive(Debug, Default, Args)]
 pub struct LoginArgs {
+    /// Name of the config to create or replace
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
+
+    /// Onboarding method; interactive login asks when omitted
+    #[arg(long, value_enum)]
+    pub method: Option<ConfigMethod>,
+
     /// Read a ModelVerse API key from the argument, or stdin when omitted
     #[arg(long, num_args = 0..=1, default_missing_value = "-", value_name = "KEY")]
     pub with_key: Option<String>,
@@ -236,6 +305,69 @@ pub struct LoginArgs {
     /// ModelVerse access region
     #[arg(long, value_enum)]
     pub region: Option<ModelVerseRegion>,
+
+    /// Custom provider Base URL (with or without /v1)
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+
+    /// Custom provider wire protocol
+    #[arg(long, value_enum)]
+    pub protocol: Option<CustomProtocol>,
+
+    /// Default model for a custom provider
+    #[arg(long, value_name = "MODEL")]
+    pub default_model: Option<String>,
+
+    /// Make this the default config
+    #[arg(long)]
+    pub set_default: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: ConfigCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Add a provider config using the onboarding wizard or flags
+    Add(LoginArgs),
+    /// List configs without revealing API keys
+    List,
+    /// Show one config without revealing its API key
+    Show { name: String },
+    /// Replace a config using the onboarding wizard or flags
+    Edit {
+        name: String,
+        #[command(flatten)]
+        options: ConfigEditArgs,
+    },
+    /// Remove a config
+    Remove {
+        name: String,
+        /// Skip the interactive confirmation
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Show or set the default config
+    Default { name: Option<String> },
+}
+
+#[derive(Debug, Default, Args)]
+pub struct ConfigEditArgs {
+    /// Replacement API key; use '-' to read stdin
+    #[arg(long, value_name = "KEY")]
+    pub api_key: Option<String>,
+    /// Replacement Base URL (with or without /v1)
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Replacement custom-provider protocol
+    #[arg(long, value_enum)]
+    pub protocol: Option<ProviderProtocol>,
+    /// Replacement default model
+    #[arg(long, value_name = "MODEL")]
+    pub default_model: Option<String>,
 }
 
 #[derive(Debug, Args)]

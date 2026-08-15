@@ -1213,6 +1213,8 @@ mod tests {
                 anthropic: Some("claude-model".into()),
             },
             oauth: None,
+            protocol: crate::cli::ProviderProtocol::All,
+            kind: crate::config::ConfigKind::AstraflowKey,
         }
     }
 

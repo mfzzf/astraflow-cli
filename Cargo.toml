@@ -1,6 +1,6 @@
 [package]
 name = "astraflow"
-version = "0.2.9"
+version = "0.3.0"
 edition = "2024"
 description = "Use AstraFlow ModelVerse with local coding agents"
 license = "Apache-2.0"

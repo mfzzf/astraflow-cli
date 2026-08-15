@@ -3,7 +3,7 @@
 `astraflow` is a Rust CLI that signs a user into UCloud, selects an AstraFlow ModelVerse API key and region, and launches local coding agents with an explicit AstraFlow endpoint, credential, provider, and compatible model.
 
 ```text
-login → default UCloud project → choose/create ModelVerse API key → ready
+first run → choose OAuth / AstraFlow Key / custom provider → save named config → ready
 ```
 
 ## Install
@@ -32,7 +32,7 @@ By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTRAFLOW_VERSION=0.2.9 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
+  ASTRAFLOW_VERSION=0.3.0 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -45,14 +45,50 @@ The Rust package is named `astraflow`; the installed command is `astraflow`. `as
 checks `mfzzf/astraflow-cli` GitHub Releases and installs the checksummed release binary,
 so it does not require a crates.io package.
 
-Then choose a region, sign in, and launch an agent:
+Run `astraflow` or `astraflow login` for first-time setup, then launch an agent:
 
 ```bash
 astraflow login --region singapore
 astraflow codex
 ```
 
-The first interactive login asks for English or Chinese and one of four ModelVerse access regions. It opens UCloud OAuth in the browser, resolves the account's default project, lists enabled UMInfer keys, and asks which key to use. If no key exists, it creates one named `AstraFlow Agent`. `--lang en|zh` overrides and saves the language.
+The first interactive setup asks for English or Chinese, a config name, and one of three provider methods:
+
+1. **UCloud OAuth (Recommended)** opens UCloud OAuth, selects a region, resolves the default project, and lets the user choose or create an AstraFlow ModelVerse key.
+2. **AstraFlow API Key** selects a region and securely prompts for an existing key.
+3. **Custom Provider** asks for a Base URL, API key, exactly one wire protocol (Chat Completions, Responses, or Anthropic Messages), and a default model. It accepts Base URLs with or without a trailing `/v1`; if `/v1/models` is unavailable, `--default-model` or the interactive manual-model prompt can be used.
+
+Each result is a named config. The first config becomes the default automatically; later configs become the default only when requested. Existing global `credentials.json` files are copied once into a private config named `default`, so upgrades do not lose credentials.
+
+```bash
+# Interactive onboarding
+astraflow config add
+
+# Direct AstraFlow key without putting it in shell history
+printf '%s' "$ASTRAFLOW_API_KEY" | \
+  astraflow config add --name work --method astraflow-key --with-key - --region singapore
+
+# Custom OpenAI Responses-compatible provider
+printf '%s' "$CUSTOM_API_KEY" | \
+  astraflow config add --name responses-lab --method custom --with-key - \
+    --base-url https://gateway.example.com/v1 --protocol responses --default-model gpt-5-mini
+```
+
+Manage and select configs with:
+
+```bash
+astraflow config list
+astraflow config show work
+astraflow config edit work
+astraflow config default work
+astraflow config remove responses-lab
+
+astraflow --config work claude
+astraflow codex --config responses-lab
+ASTRAFLOW_CONFIG=work astraflow pi
+```
+
+`--config <name>` overrides the default config for one command and takes precedence over workspace or environment credentials. Config-specific model-role defaults are kept separately. `config list`, `config show`, `auth`, and JSON output never reveal API keys or OAuth tokens. A custom single-protocol config is accepted only by matching harnesses: Claude Code uses Anthropic Messages, Codex uses Responses, and the remaining harnesses use Chat Completions.
 
 | `--region` value | ModelVerse endpoint |
 | --- | --- |
@@ -85,10 +121,10 @@ printf '%s' "$ASTRAFLOW_API_KEY" | astraflow login --with-key
 
 The surface follows Ori's local-harness workflow:
 
-- `login`, `auth`, `help`, `version`, `update`, `changelog`
+- `login`, `config add|list|show|edit|remove|default`, `auth`, `help`, `version`, `update`, `changelog`
 - `claude`, `codex`, `grok`, `opencode`, `hermes`, `pi`, `dsh`/`deepseek`, `prime-agent`/`prime`
 - `harness-doctor`, `harness list|inspect|test`, `workspace`, `vault-tunnel`, `eval`
-- global `--json`/`--agent`, `--human`/`--tty`, `--wizard`, `--lang`, `--log-level`, and `--completions`
+- global `--config`, `--json`/`--agent`, `--human`/`--tty`, `--wizard`, `--lang`, `--log-level`, and `--completions`
 
 In an interactive terminal every harness command opens a cross-platform Ratatui model picker even when `--model` is omitted. Its bordered, responsive interface includes role tabs, direct search, a scrollable highlighted model table, compact token-price summaries, and full pricing details for the selected model. Up/Down selects, Tab/Shift+Tab or Left/Right switches model roles, `D` saves the complete AstraFlow default combination, Enter launches, and Esc cancels. Pi and Prime also use Space to toggle multiple models in their Ctrl+P cycle pool. Prices come from the current Key's authenticated `/v1/models` response; image/video/audio charges are hidden from this text-agent picker.
 
@@ -137,12 +173,14 @@ Pipes default to one JSON document on stdout. Use `--human` to force human text.
 
 Resolution order is:
 
-1. `ASTRAFLOW_API_KEY`
-2. `MODELVERSE_API_KEY`
-3. nearest parent `.astraflow/credentials.json`
-4. the OS-specific global AstraFlow configuration directory
+1. explicit `--config <name>` or `ASTRAFLOW_CONFIG`
+2. `ASTRAFLOW_API_KEY`
+3. `MODELVERSE_API_KEY`
+4. nearest parent `.astraflow/credentials.json`
+5. the named default config in the OS-specific AstraFlow configuration directory
+6. a legacy global `credentials.json` during its one-time migration
 
-Credential directories are mode `0700` and files are mode `0600` on Unix. Symlinked or group/world-readable credential files are rejected; `astraflow workspace --repair` restores permissions.
+Credential and named-config directories are mode `0700` and files are mode `0600` on Unix. Symlinked or group/world-readable credential files are rejected; `astraflow workspace --repair` restores permissions for every named config.
 
 The UCloud control-plane client intentionally exposes only:
 
@@ -191,11 +229,13 @@ docker build --target harness-all -t astraflow-harness-all .
 docker run --rm astraflow-harness-all
 ```
 
-Pushes to `main` run formatting, tests, Clippy, and hostile-config routing checks with pinned Claude Code 2.1.233, Codex CLI 0.147.0, Grok Build 1.0.4, OpenCode 1.18.18, Hermes Agent 0.19.0, Pi 0.84.2 and 0.73.1, DeepSeek Harness 0.1.0-rc.6, and Prime Agent 0.7.2 on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.9`, build Linux GNU binaries inside Rust 1.88 Bookworm containers for glibc 2.36 compatibility, plus native macOS Intel/Apple Silicon and Windows x64/ARM64 archives, before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
+Pushes to `main` run formatting, tests, Clippy, and hostile-config routing checks with pinned Claude Code 2.1.233, Codex CLI 0.147.0, Grok Build 1.0.4, OpenCode 1.18.18, Hermes Agent 0.19.0, Pi 0.84.2 and 0.73.1, DeepSeek Harness 0.1.0-rc.6, and Prime Agent 0.7.2 on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.3.0`, build Linux GNU binaries inside Rust 1.88 Bookworm containers for glibc 2.36 compatibility, plus native macOS Intel/Apple Silicon and Windows x64/ARM64 archives, before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
 
 ## 中文说明
 
-`astraflow login` 会先选择中英文和中国大陆、新加坡、洛杉矶、法兰克福四个接入地域之一，然后通过浏览器完成 UCloud OAuth 登录，自动获取默认项目，列出可用的 ModelVerse API Key，并让用户选择。若项目中没有 Key，只会创建一个名为 `AstraFlow Agent` 的 UMInfer Key，不会执行其他资源操作。
+首次直接运行 `astraflow`、`astraflow login` 或 `astraflow config add` 会进入配置向导，可选择 UCloud OAuth（推荐）、直接填写 AstraFlow API Key，或自定义 Base URL + API Key。自定义服务必须选择 Chat Completions、Responses、Anthropic Messages 三种协议之一；若服务不支持 `/v1/models`，可手动填写默认模型。OAuth 会选择中国大陆、新加坡、洛杉矶、法兰克福四个接入地域之一，自动获取默认项目并选择或创建名为 `AstraFlow Agent` 的 Key。
+
+每次完成向导都会保存为一个具名 Config。第一个自动成为默认配置，也可用 `astraflow config default <名称>` 修改默认项；启动时用 `astraflow --config <名称> claude` 或 `astraflow claude --config <名称>` 临时切换。`config add/list/show/edit/remove/default` 提供完整增删改查，列表和 JSON 输出不会显示 API Key 或 OAuth Token。旧版全局凭据会一次性迁移为名为 `default` 的配置。
 
 登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，不再调用模型详情接口。在后续接入可维护的协议能力数据之前，所有对话文本模型都会同时出现在 Claude Code、Codex 和其他 agent 的模型选择器中，不再按 Claude、GPT、o-series 或 Codex 名称过滤。图片、视频、音频生成、Embedding、Rerank、OCR 和 Batch 模型仍会被排除，视觉语言对话模型保留。所有协议都优先使用 `deepseek-v4-flash-0731`，否则选择认证模型列表中最新的可用文本模型；重新执行 `astraflow login` 即可刷新。
 

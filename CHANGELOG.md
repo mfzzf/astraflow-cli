@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 — 2026-08-15
+
+- Added named provider configurations with a selectable default, explicit `--config <name>` routing, and secure config CRUD commands.
+- Added first-run onboarding for UCloud OAuth, direct AstraFlow API keys, and custom Base URL/API key providers using Chat Completions, Responses, or Anthropic Messages.
+
 ## 0.2.9 — 2026-08-15
 
 - Rebuilt the interactive model picker with Ratatui and Crossterm, adding a responsive bordered layout, role tabs, a search panel, a scrollable highlighted model table, compact token prices, selected-model details, and automatic terminal restoration.
