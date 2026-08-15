@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.6 — 2026-08-15
+
+- Isolated Codex, Grok, Hermes, Pi, Prime Agent, and DSH from conflicting user, project, profile, and managed configuration during wrapped launches.
+- Disabled OpenCode project configuration, default plugins, external skills, and Claude compatibility imports; retained Claude's explicit empty setting sources.
+- Rejected passthrough provider, model, API-key, config, profile, patch, plugin, and extension flags that could override AstraFlow routing.
+- Added generated Codex catalog entries for authenticated Responses models not bundled with Codex CLI 0.147.0.
+- Forced Grok main and auxiliary requests to the selected AstraFlow model and removed stale same-name credentials and authorization headers.
+- Expanded the pinned real-binary hostile-config suite to verify exact protocol path, model, bearer authentication, and non-execution of hooks/plugins/extensions across every harness.
+
 ## 0.2.5 — 2026-08-15
 
 - Prevented Claude Code user/project/local settings from overriding the AstraFlow endpoint, bearer token, or model for wrapped launches.

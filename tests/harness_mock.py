@@ -46,6 +46,7 @@ class Handler(BaseHTTPRequestHandler):
             "authorization": self.headers.get("authorization"),
             "x_api_key": self.headers.get("x-api-key"),
             "model": payload.get("model"),
+            "headers": {key.lower(): value for key, value in self.headers.items()},
         }
         with open(LOG, "a", encoding="utf-8") as output:
             output.write(json.dumps(record) + "\n")

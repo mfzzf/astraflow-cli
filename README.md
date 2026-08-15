@@ -32,7 +32,7 @@ By default, Unix installs to `/usr/local/bin` when writable and otherwise to `~/
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh | \
-  ASTRAFLOW_VERSION=0.2.5 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
+  ASTRAFLOW_VERSION=0.2.6 ASTRAFLOW_INSTALL_DIR="$HOME/bin" sh
 ```
 
 For a source install, Rust 1.88 or newer is required:
@@ -90,14 +90,18 @@ The surface follows Ori's local-harness workflow:
 - `harness-doctor`, `harness list|inspect|test`, `workspace`, `vault-tunnel`, `eval`
 - global `--json`/`--agent`, `--human`/`--tty`, `--wizard`, `--lang`, `--log-level`, and `--completions`
 
-Use the wrapper-level `--model` to force a model. Arguments after `--` pass through unchanged:
+Use the wrapper-level `--model` to force a model. Ordinary arguments after `--` pass through to the harness:
 
 ```bash
 astraflow codex --model gpt-5-mini -- --full-auto
 astraflow claude -- --permission-mode plan
 ```
 
-The wrapper's provider and model selection has higher precedence than existing user defaults. Codex receives per-invocation `-c` values; Claude ignores user/project/local settings for the wrapped session and receives explicit model and gateway variables; OpenCode receives its final in-memory config layer; DSH receives a final patch; Grok, Pi, and Prime receive a named `astraflow` provider plus explicit CLI selection; Hermes runs with an isolated per-launch provider config. API keys are passed through process environment only, never written into those harness config files.
+Provider, model, API-key, config, profile, patch, plugin, and extension flags that could replace AstraFlow routing are rejected after `--`; select the model with the outer `astraflow <harness> --model ...` option instead.
+
+Wrapped launches isolate every harness from conflicting local state. Codex and Grok receive temporary homes; Claude ignores user/project/local settings; OpenCode disables project configuration, default plugins, external skills, and Claude compatibility imports; Hermes uses a temporary safe-mode profile and empty managed scope; Pi and Prime use temporary agent configuration while retaining their normal session directories; DSH uses an isolated home and managed headless patch. API keys are passed through process environment only and are never written into those temporary harness files.
+
+Organization-managed Claude, Codex, or Grok policy remains authoritative by design. If an administrator requires a conflicting provider, the wrapped launch fails instead of bypassing that policy.
 
 The adapters track the official configuration contracts for [Claude Code](https://code.claude.com/docs/en/llm-gateway), [Codex CLI](https://developers.openai.com/codex/config-reference/), [Grok Build](https://github.com/xai-org/grok-build), [OpenCode](https://opencode.ai/docs/providers/), [Hermes Agent](https://github.com/NousResearch/hermes-agent), [Pi](https://github.com/earendil-works/pi), [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness), and [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent).
 
@@ -161,13 +165,15 @@ docker build --target harness-all -t astraflow-harness-all .
 docker run --rm astraflow-harness-all
 ```
 
-Pushes to `main` run formatting, tests, Clippy, and all eight pinned real-CLI routing checks—including both legacy/current Pi authentication and hostile Claude settings—on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.5`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
+Pushes to `main` run formatting, tests, Clippy, and hostile-config routing checks with pinned Claude Code 2.1.233, Codex CLI 0.147.0, Grok Build 1.0.4, OpenCode 1.18.18, Hermes Agent 0.19.0, Pi 0.84.2 and 0.73.1, DeepSeek Harness 0.1.0-rc.6, and Prime Agent 0.7.2 on the repository's dedicated Linux x64 self-hosted Rust runner. Tags matching the crate version, such as `v0.2.6`, build native release archives on Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64 before publishing a checksummed GitHub Release. Public pull requests do not run on the self-hosted machine.
 
 ## 中文说明
 
 `astraflow login` 会先选择中英文和中国大陆、新加坡、洛杉矶、法兰克福四个接入地域之一，然后通过浏览器完成 UCloud OAuth 登录，自动获取默认项目，列出可用的 ModelVerse API Key，并让用户选择。若项目中没有 Key，只会创建一个名为 `AstraFlow Agent` 的 UMInfer Key，不会执行其他资源操作。
 
-登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，并在本地按模型 ID、模型广场名称和别名判断协议，不再调用模型详情接口。Claude 系列固定使用 Anthropic Messages API；GPT、o-series 和 Codex 系列可供 Responses 使用；其余对话文本模型使用 Chat Completions。图片、视频、音频生成、Embedding、Rerank、OCR 和 Batch 模型会被排除。每种协议默认选择认证模型列表中 `created` 时间戳最新的可用模型；重新执行 `astraflow login` 即可刷新。启动时 `astraflow` 会显式覆盖旧的 endpoint、key、provider 和 model 配置。
+登录会从所选地域的 `/v1/models` 获取当前 Key 可用的模型，并在本地按模型 ID、模型广场名称和别名判断协议，不再调用模型详情接口。Claude 系列固定使用 Anthropic Messages API；GPT、o-series 和 Codex 系列可供 Responses 使用；其余对话文本模型使用 Chat Completions。图片、视频、音频生成、Embedding、Rerank、OCR 和 Batch 模型会被排除。每种协议默认选择认证模型列表中 `created` 时间戳最新的可用模型；重新执行 `astraflow login` 即可刷新。
+
+启动 harness 时，`astraflow` 会隔离用户、项目和本地配置，并显式固定 endpoint、key、provider 和 model。`--` 后仍可传递普通参数，但会拒绝能够覆盖路由的内部 model/provider/config/profile/patch/plugin/extension 参数；请使用外层 `astraflow <harness> --model ...` 选择模型。
 
 Linux / macOS 一键安装：
 
