@@ -16,14 +16,14 @@ jobs:
       TARGET: x86_64-unknown-linux-gnu
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build
         run: |
           rustup toolchain install 1.88.0 --profile minimal
           rustup target add "$TARGET" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "$TARGET"
           tar -czf "astf-${TARGET}.tar.gz" -C "target/${TARGET}/release" astf
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: astf-linux-x64
           path: astf-${{ env.TARGET }}.tar.gz
@@ -37,14 +37,14 @@ jobs:
       TARGET: aarch64-unknown-linux-gnu
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build
         run: |
           rustup toolchain install 1.88.0 --profile minimal
           rustup target add "$TARGET" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "$TARGET"
           tar -czf "astf-${TARGET}.tar.gz" -C "target/${TARGET}/release" astf
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: astf-linux-arm64
           path: astf-${{ env.TARGET }}.tar.gz
@@ -67,14 +67,14 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build
         run: |
           rustup toolchain install 1.88.0 --profile minimal
           rustup target add "${{ matrix.target }}" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "${{ matrix.target }}"
           tar -czf "astf-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" astf
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: astf-macos-${{ matrix.arch }}
           path: astf-${{ matrix.target }}.tar.gz
@@ -97,7 +97,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build
         shell: pwsh
         run: |
@@ -105,7 +105,7 @@ jobs:
           rustup target add "${{ matrix.target }}" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "${{ matrix.target }}"
           Compress-Archive -Path "target/${{ matrix.target }}/release/astf.exe" -DestinationPath "astf-${{ matrix.target }}.zip"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: astf-windows-${{ matrix.arch }}
           path: astf-${{ matrix.target }}.zip
@@ -117,12 +117,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Validate tag
         run: |
           version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
           test "v${version}" = "$GITHUB_REF_NAME"
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
