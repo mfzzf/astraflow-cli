@@ -22,7 +22,7 @@ dialoguer = "0.11"
 directories = "6.0"
 futures-util = "0.3"
 is-terminal = "0.4"
-rand = "0.9"
+rand = "0.10"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 secrecy = { version = "0.10", features = ["serde"] }
