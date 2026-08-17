@@ -40,19 +40,36 @@ export CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1
 export HERMES_MANAGED_DIR=/tmp/hostile/hermes-managed
 export HERMES_ENABLE_PROJECT_PLUGINS=1
 mkdir -p "$GROK_HOME" "$PI_CODING_AGENT_DIR" "$PRIME_AGENT_CODING_AGENT_DIR" "$DSH_HOME" \
-  /root/.codex /root/.claude /root/.config/opencode /root/.hermes/profiles/hostile \
+  "$PI_CODING_AGENT_DIR/extensions" "$PRIME_AGENT_CODING_AGENT_DIR/extensions" \
+  "$PI_CODING_AGENT_DIR/skills/astraflow-smoke" \
+  "$PRIME_AGENT_CODING_AGENT_DIR/skills/astraflow-smoke" \
+  "$GROK_HOME/skills/astraflow-grok-user" \
+  "$OPENCODE_CONFIG_DIR/skills/astraflow-user-skill" \
+  /root/.codex/skills/astraflow-smoke /root/.claude/skills/astraflow-smoke \
+  /root/.config/opencode /root/.hermes/profiles/hostile /root/.hermes/skills/astraflow-smoke \
   "$OPENCODE_CONFIG_DIR" "$HERMES_MANAGED_DIR" \
   /tmp/astraflow-hostile-project/.claude /tmp/astraflow-hostile-project/.codex \
-  /tmp/astraflow-hostile-project/.opencode/plugins /tmp/astraflow-hostile-project/.pi/extensions \
-  /tmp/astraflow-hostile-project/.prime/agent/extensions
+  /tmp/astraflow-hostile-project/.opencode/plugins \
+  /tmp/astraflow-hostile-project/.opencode/skills/astraflow-project-skill \
+  /tmp/astraflow-hostile-project/.grok/skills/astraflow-grok-project \
+  /tmp/astraflow-hostile-project/.pi/extensions /tmp/astraflow-hostile-project/.prime/agent/extensions
 
-printf 'model = "hostile-model"\nmodel_provider = "modelverse"\n[model_providers.modelverse]\nname = "Hostile"\nbase_url = "http://127.0.0.1:9/v1"\nenv_key = "HOSTILE_KEY"\nwire_api = "responses"\nauth = { command = "false" }\nhttp_headers = { "x-hostile" = "present" }\nquery_params = { hostile = "yes" }\n' > /root/.codex/config.toml
-printf 'this = [is malformed\n' > /tmp/astraflow-hostile-project/.codex/config.toml
+printf 'model = "hostile-model"\nmodel_provider = "modelverse"\n[model_providers.modelverse]\nname = "Hostile"\nbase_url = "http://127.0.0.1:9/v1"\nenv_key = "HOSTILE_KEY"\nwire_api = "responses"\nhttp_headers = { "x-hostile" = "present" }\nquery_params = { hostile = "yes" }\n' > /root/.codex/config.toml
+printf 'model = "hostile-project-model"\nmodel_provider = "modelverse"\n' > /tmp/astraflow-hostile-project/.codex/config.toml
+printf '%s\n' '---' 'name: astraflow-smoke' 'description: Benign user skill used by the AstraFlow smoke test.' '---' '' 'Preserve this user skill.' > /root/.codex/skills/astraflow-smoke/SKILL.md
+cp /root/.codex/skills/astraflow-smoke/SKILL.md /root/.claude/skills/astraflow-smoke/SKILL.md
+cp /root/.codex/skills/astraflow-smoke/SKILL.md /root/.hermes/skills/astraflow-smoke/SKILL.md
+cp /root/.codex/skills/astraflow-smoke/SKILL.md "$PI_CODING_AGENT_DIR/skills/astraflow-smoke/SKILL.md"
+cp /root/.codex/skills/astraflow-smoke/SKILL.md "$PRIME_AGENT_CODING_AGENT_DIR/skills/astraflow-smoke/SKILL.md"
+printf '%s\n' '---' 'name: astraflow-user-skill' 'description: AstraFlow OpenCode user skill smoke.' '---' '' 'user skill' > "$OPENCODE_CONFIG_DIR/skills/astraflow-user-skill/SKILL.md"
+printf '%s\n' '---' 'name: astraflow-project-skill' 'description: AstraFlow OpenCode project skill smoke.' '---' '' 'project skill' > /tmp/astraflow-hostile-project/.opencode/skills/astraflow-project-skill/SKILL.md
+printf '%s\n' '---' 'name: astraflow-grok-user' 'description: AstraFlow Grok user skill smoke.' '---' '' 'user skill' > "$GROK_HOME/skills/astraflow-grok-user/SKILL.md"
+printf '%s\n' '---' 'name: astraflow-grok-project' 'description: AstraFlow Grok project skill smoke.' '---' '' 'project skill' > /tmp/astraflow-hostile-project/.grok/skills/astraflow-grok-project/SKILL.md
 printf '{"model":"hostile/model","provider":{"hostile":{"models":{"model":{}}}}}\n' > /root/.config/opencode/opencode.json
 printf '{"model":"hostile/model","provider":{"astraflow":{"options":{"baseURL":"http://127.0.0.1:9/v1","apiKey":"hostile"}}}}\n' > "$OPENCODE_CONFIG"
 printf '{"model":"hostile/model","provider":{"astraflow":{"options":{"baseURL":"http://127.0.0.1:9/v1","apiKey":"hostile"}}}}\n' > "$OPENCODE_CONFIG_DIR/opencode.json"
 printf '{"model":"hostile/model","provider":{"astraflow":{"options":{"baseURL":"http://127.0.0.1:9/v1","apiKey":"hostile"}}}}\n' > /tmp/astraflow-hostile-project/opencode.json
-printf 'import { writeFileSync } from "node:fs"; writeFileSync("/tmp/opencode-plugin-ran", "yes"); export const Hostile = async () => ({});\n' > /tmp/astraflow-hostile-project/.opencode/plugins/hostile.ts
+printf 'import { writeFileSync } from "node:fs"; writeFileSync("/tmp/opencode-plugin-ran", "yes"); export const AstraFlowSmoke = async () => ({});\n' > /tmp/astraflow-hostile-project/.opencode/plugins/astraflow-smoke.ts
 printf '{"model":"hostile-model","env":{"ANTHROPIC_AUTH_TOKEN":"hostile-token","ANTHROPIC_BASE_URL":"http://127.0.0.1:9"}}\n' > /root/.claude/settings.json
 printf '{"model":"hostile-model","env":{"ANTHROPIC_AUTH_TOKEN":"hostile-token","ANTHROPIC_BASE_URL":"http://127.0.0.1:9"},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"touch /tmp/claude-hook-ran"}]}]}}\n' > /tmp/astraflow-hostile-project/.claude/settings.json
 cp /tmp/astraflow-hostile-project/.claude/settings.json /tmp/astraflow-hostile-project/.claude/settings.local.json
@@ -60,13 +77,13 @@ printf 'model:\n  default: hostile-model\n  base_url: http://127.0.0.1:9/v1\n' >
 printf 'hostile\n' > /root/.hermes/active_profile
 printf 'model:\n  default: hostile-model\n  provider: hostile\n' > /root/.hermes/profiles/hostile/config.yaml
 printf 'providers:\n  astraflow:\n    base_url: http://127.0.0.1:9/v1\n    key_env: HOSTILE_KEY\n' > "$HERMES_MANAGED_DIR/config.yaml"
-printf '[model.astraflow]\nmodel="hostile-model"\nbase_url="http://127.0.0.1:9/v1"\nenv_key="HOSTILE_KEY"\napi_key="hostile-token"\napi_backend="chat_completions"\n[model.astraflow.extra_headers]\nAuthorization="Bearer hostile-header-token"\n' > "$GROK_HOME/config.toml"
+printf 'theme="user-theme"\n[model.user]\nmodel="user-model"\nbase_url="http://127.0.0.1:9/v1"\nenv_key="HOSTILE_KEY"\napi_backend="chat_completions"\n[model.astraflow]\nmodel="hostile-model"\nbase_url="http://127.0.0.1:9/v1"\nenv_key="HOSTILE_KEY"\napi_key="hostile-token"\napi_backend="chat_completions"\n[model.astraflow.extra_headers]\nAuthorization="Bearer hostile-header-token"\n' > "$GROK_HOME/config.toml"
 printf '{"providers":{"hostile":{"baseUrl":"http://127.0.0.1:9/v1","api":"openai-completions","apiKey":"$HOSTILE_KEY","authHeader":true,"models":[{"id":"hostile-model"}]}}}\n' > "$PI_CODING_AGENT_DIR/models.json"
 cp "$PI_CODING_AGENT_DIR/models.json" "$PRIME_AGENT_CODING_AGENT_DIR/models.json"
 printf '{"astraflow":{"type":"api_key","key":"hostile-token"}}\n' > "$PI_CODING_AGENT_DIR/auth.json"
 cp "$PI_CODING_AGENT_DIR/auth.json" "$PRIME_AGENT_CODING_AGENT_DIR/auth.json"
-printf 'import { writeFileSync } from "node:fs"; writeFileSync("/tmp/pi-extension-ran", "yes"); export default function () {}\n' > /tmp/astraflow-hostile-project/.pi/extensions/hostile.ts
-printf 'import { writeFileSync } from "node:fs"; writeFileSync("/tmp/prime-extension-ran", "yes"); export default function () {}\n' > /tmp/astraflow-hostile-project/.prime/agent/extensions/hostile.ts
+printf 'import { writeFileSync } from "node:fs"; writeFileSync("/tmp/pi-extension-ran", "yes"); export default function () {}\n' > "$PI_CODING_AGENT_DIR/extensions/astraflow-smoke.ts"
+printf 'import { writeFileSync } from "node:fs"; writeFileSync("/tmp/prime-extension-ran", "yes"); export default function () {}\n' > "$PRIME_AGENT_CODING_AGENT_DIR/extensions/astraflow-smoke.ts"
 printf 'agent-default-model:\n  provider: astraflow\n  model: hostile-model\nllm-pi-ai:\n  providers:\n    astraflow:\n      apiKeyEnv: HOSTILE_KEY\n      baseURL: http://127.0.0.1:9/v1\n      api: openai-completions\n      models: [{id: hostile-model}]\n' > "$DSH_HOME/settings.yaml"
 export HOSTILE_KEY=must-not-be-used
 cd /tmp/astraflow-hostile-project
@@ -88,6 +105,16 @@ run_case() {
   shift
   local before
   local binary_args=()
+  local customization_marker=
+  case "$name" in
+    claude) customization_marker=/tmp/claude-hook-ran ;;
+    opencode) customization_marker=/tmp/opencode-plugin-ran ;;
+    pi) customization_marker=/tmp/pi-extension-ran ;;
+    prime-agent) customization_marker=/tmp/prime-extension-ran ;;
+  esac
+  if [ -n "$customization_marker" ]; then
+    rm -f "$customization_marker"
+  fi
   if [ -n "${HARNESS_BINARY:-}" ]; then
     binary_args=(--binary "$HARNESS_BINARY")
   fi
@@ -131,12 +158,13 @@ PY
     printf '%s returned no ASTRAFLOW_OK marker\n' "$name" >&2
     return 1
   fi
-  for marker in /tmp/claude-hook-ran /tmp/opencode-plugin-ran /tmp/pi-extension-ran /tmp/prime-extension-ran; do
-    if [ -e "$marker" ]; then
-      printf '%s caused a hostile extension or hook to execute: %s\n' "$name" "$marker" >&2
-      return 1
-    fi
-  done
+  if [ -n "$customization_marker" ] && [ ! -e "$customization_marker" ]; then
+    printf '%s did not load the user customization marker: %s\n' "$name" "$customization_marker" >&2
+    return 1
+  fi
+  if [ -n "$customization_marker" ]; then
+    echo "$name: user customization loaded"
+  fi
 }
 
 run_case claude --print 'Reply with exactly ASTRAFLOW_OK' --output-format json
@@ -149,6 +177,90 @@ HARNESS_BINARY=/opt/pi-legacy/node_modules/.bin/pi run_case pi --print 'Reply wi
 unset HARNESS_BINARY
 run_case dsh 'Reply with exactly ASTRAFLOW_OK'
 run_case prime-agent --print 'Reply with exactly ASTRAFLOW_OK'
+
+(
+  printf '%s\n' \
+    '{"method":"initialize","id":0,"params":{"clientInfo":{"name":"astraflow-smoke","title":"AstraFlow Smoke","version":"1"}}}' \
+    '{"method":"initialized","params":{}}' \
+    '{"method":"skills/list","id":25,"params":{"cwds":["/tmp/astraflow-hostile-project"],"forceReload":true}}'
+  sleep 2
+) | timeout 20 astraflow codex --model astraflow-test-model -- app-server \
+  >/tmp/codex-skills.jsonl 2>/tmp/codex-skills.err
+python3 - /tmp/codex-skills.jsonl <<'PY'
+import json, sys
+messages = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+response = next(message for message in messages if message.get("id") == 25)
+assert "error" not in response, response
+def walk(value):
+    if isinstance(value, dict):
+        if isinstance(value.get("name"), str):
+            yield value["name"], value.get("path") or value.get("location")
+        for child in value.values():
+            yield from walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from walk(child)
+found = list(walk(response["result"]))
+assert any(name == "astraflow-smoke" and "/root/.codex/skills/astraflow-smoke/" in str(path) for name, path in found), found
+print("codex: user skill visible via app-server skills/list")
+PY
+
+timeout 20 astraflow opencode --model astraflow-test-model -- debug skill \
+  >/tmp/opencode-skills.json 2>/tmp/opencode-skills.err
+python3 - /tmp/opencode-skills.json <<'PY'
+import json, sys
+skills = json.load(open(sys.argv[1], encoding="utf-8"))
+by_name = {skill["name"]: skill for skill in skills}
+assert {"astraflow-user-skill", "astraflow-project-skill"} <= by_name.keys(), by_name.keys()
+assert str(by_name["astraflow-user-skill"].get("location", "")).startswith("/tmp/hostile/opencode-dir/skills/"), by_name
+assert str(by_name["astraflow-project-skill"].get("location", "")).startswith("/tmp/astraflow-hostile-project/.opencode/skills/"), by_name
+print("opencode: user and project skills discovered")
+PY
+
+timeout 20 astraflow grok --model astraflow-test-model -- inspect --json \
+  >/tmp/grok-inspect.json 2>/tmp/grok-inspect.err
+python3 - /tmp/grok-inspect.json "$GROK_HOME/config.toml" <<'PY'
+import json, sys
+result = json.load(open(sys.argv[1], encoding="utf-8"))
+by_name = {skill["name"]: skill for skill in result["skills"]}
+assert {"astraflow-grok-user", "astraflow-grok-project"} <= by_name.keys(), by_name.keys()
+def source_type(skill):
+    source = skill.get("source")
+    return source.get("type") if isinstance(source, dict) else source
+assert source_type(by_name["astraflow-grok-user"]) == "user", by_name["astraflow-grok-user"]
+assert source_type(by_name["astraflow-grok-project"]) == "project", by_name["astraflow-grok-project"]
+assert sys.argv[2] in json.dumps(result["configSources"]), result["configSources"]
+print("grok: user and project skills plus GROK_HOME config visible")
+PY
+
+printf '%s\n' '{"type":"get_commands"}' | timeout 20 \
+  astraflow pi --model astraflow-test-model -- --mode rpc --no-session \
+  >/tmp/pi-commands.jsonl 2>/tmp/pi-commands.err
+printf '%s\n' '{"type":"get_commands"}' | timeout 20 \
+  astraflow prime-agent --model astraflow-test-model -- --mode rpc --no-session \
+  >/tmp/prime-commands.jsonl 2>/tmp/prime-commands.err
+python3 - /tmp/pi-commands.jsonl /tmp/prime-commands.jsonl <<'PY'
+import json, sys
+for path in sys.argv[1:]:
+    messages = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
+    response = next(message for message in messages if message.get("type") == "response" and message.get("command") == "get_commands")
+    assert response.get("success") is True, response
+    commands = {command["name"]: command for command in response["data"]["commands"]}
+    assert "skill:astraflow-smoke" in commands, commands.keys()
+    assert commands["skill:astraflow-smoke"].get("source") == "skill", commands["skill:astraflow-smoke"]
+    print(path + ": user skill visible via RPC")
+PY
+
+grep -Fq 'user-theme' "$GROK_HOME/config.toml"
+grep -Fq '[model.user]' "$GROK_HOME/config.toml"
+python3 - "$PI_CODING_AGENT_DIR/models.json" "$PRIME_AGENT_CODING_AGENT_DIR/models.json" <<'PY'
+import json, sys
+for path in sys.argv[1:]:
+    config = json.load(open(path, encoding="utf-8"))
+    assert "hostile" in config["providers"], (path, config)
+    assert "astraflow-managed" in config["providers"], (path, config)
+PY
+echo 'Grok, Pi, and Prime user config entries were preserved alongside AstraFlow routing'
 
 astraflow dsh --model astraflow-test-model --profile web \
   >/tmp/dsh-web.out 2>/tmp/dsh-web.err &

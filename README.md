@@ -153,9 +153,9 @@ The role tabs match each harness's real configuration surface:
 | DSH | Default, Title, Compaction, Spawn Agent, Fork Agent |
 | Hermes | Default |
 
-Unsupported roles are deliberately absent: Pi and Prime compaction reuse the current model, Grok web search needs a separate hosted-search capability, and image/video roles are not exposed. Saved choices live only in AstraFlow's private settings file; launches continue to generate isolated temporary harness configuration.
+Unsupported roles are deliberately absent: Pi and Prime compaction reuse the current model, Grok web search needs a separate hosted-search capability, and image/video roles are not exposed. Saved model choices live in AstraFlow's private settings file. Harness launches keep the user's normal configuration and customization directories.
 
-Provider, model, API-key, config, profile, patch, plugin, and extension flags that could replace AstraFlow routing are rejected after `--`; select the model with the outer `astraflow <harness> --model ...` option instead.
+Provider, model, API-key, and routing-config flags that could replace AstraFlow routing are rejected after `--`; select the model with the outer `astraflow <harness> --model ...` option instead. Ordinary harness arguments, including Pi and Prime extension flags, continue to work.
 
 DSH supports AstraFlow-managed `headless` and `web` profiles. Headless requires a task; Web starts the browser UI while keeping AstraFlow's endpoint, key, and model patch:
 
@@ -164,7 +164,9 @@ astraflow dsh --model deepseek-v4-flash-0731 -- "run the tests"
 astraflow dsh --model deepseek-v4-flash-0731 --profile web
 ```
 
-Wrapped launches protect endpoint, key, provider, and model routing from conflicting local state. Codex and Grok receive temporary homes; Claude ignores user/project/local settings; OpenCode disables project configuration, default plugins, external skills, and Claude compatibility imports; Hermes uses a temporary safe-mode profile and empty managed scope; Pi and Prime use temporary agent configuration while retaining their normal session directories. DSH keeps the user's normal `DSH_HOME`, plugins, profiles, and sessions, while its enabled settings service uses a persistent AstraFlow-scoped document so Web preferences and onboarding acknowledgement survive restarts without an existing DSH model/provider setting overriding AstraFlow routing. AstraFlow appends a final managed patch that pins its provider, endpoint, key, and selected models. API keys are passed through process environment only and are never written into temporary harness files.
+Wrapped launches protect only endpoint, key, protocol, provider, and selected model slots from conflicting local state. Claude loads `user`, `project`, and `local` settings; Codex keeps `CODEX_HOME`; Grok keeps `GROK_HOME`; OpenCode loads project/default/external skills and plugins; Hermes keeps its user home, skills, plugins, MCP servers, hooks, memory, and tool settings; Pi and Prime keep their agent directories, sessions, skills, prompts, themes, packages, and extensions. DSH keeps the user's normal `DSH_HOME`, plugins, profiles, and sessions, while its enabled settings service uses a persistent AstraFlow-scoped document so Web preferences and onboarding acknowledgement survive restarts. AstraFlow adds a final managed routing layer and leaves unrelated user settings intact.
+
+API keys normally remain in the child process environment. Claude Code is the exception: because its loaded `settings.json` can override parent environment variables, AstraFlow passes a mode-`0600` temporary CLI settings overlay containing the routing environment; the file is deleted as soon as Claude exits. Hermes receives only a temporary provider definition that references a per-launch random environment-variable name, never the key value itself.
 
 Organization-managed Claude, Codex, or Grok policy remains authoritative by design. If an administrator requires a conflicting provider, the wrapped launch fails instead of bypassing that policy.
 

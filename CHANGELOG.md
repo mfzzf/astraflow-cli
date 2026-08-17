@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3 — 2026-08-17
+
+- Preserve each harness's user configuration and customization discovery while keeping AstraFlow endpoint, credentials, protocol, provider, and model slots pinned.
+- Restore Claude Code user/project/local skills, plugins, hooks, agents, and settings through a high-priority ephemeral routing overlay.
+- Restore Codex skills/plugins/apps, Grok Web search and user home, OpenCode project/default/external skills and plugins, Hermes skills/plugins/MCP/hooks/memory, and Pi/Prime extensions and agent resources.
+- Add positive Docker smoke coverage proving user hooks/plugins/extensions execute while all eight real harnesses still send the selected model and AstraFlow credential to the managed endpoint.
+
 ## 0.3.2 — 2026-08-16
 
 - Restored DeepSeek Harness settings, plugins, profiles, sessions, and Web onboarding persistence; the enabled settings service now uses a persistent AstraFlow-scoped document so existing DSH provider settings cannot override the final managed routing patch.

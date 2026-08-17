@@ -292,6 +292,7 @@ pub fn environment_with_models(
             values.insert("NO_BROWSER".into(), "1".into());
         }
         Harness::Claude => {
+            values.insert("ANTHROPIC_API_KEY".into(), key.clone());
             values.insert("ANTHROPIC_AUTH_TOKEN".into(), key);
             values.insert("ANTHROPIC_BASE_URL".into(), root.to_owned());
             values.insert("ANTHROPIC_MODEL".into(), model.to_owned());
@@ -304,66 +305,31 @@ pub fn environment_with_models(
             ] {
                 values.insert(name.into(), model_for_slot(models, slot, model).to_owned());
             }
+            for name in [
+                "CLAUDE_CODE_USE_BEDROCK",
+                "CLAUDE_CODE_USE_VERTEX",
+                "CLAUDE_CODE_USE_FOUNDRY",
+                "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+                "CLAUDE_CODE_USE_MANTLE",
+                "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+            ] {
+                values.insert(name.into(), "0".into());
+            }
             values.insert("NO_BROWSER".into(), "1".into());
         }
         Harness::Opencode => {
             values.insert("OPENAI_API_KEY".into(), key);
             values.insert("OPENAI_BASE_URL".into(), openai_base.clone());
-            values.insert("OPENCODE_DISABLE_PROJECT_CONFIG".into(), "1".into());
-            values.insert("OPENCODE_DISABLE_DEFAULT_PLUGINS".into(), "1".into());
-            values.insert("OPENCODE_DISABLE_EXTERNAL_SKILLS".into(), "1".into());
-            values.insert("OPENCODE_DISABLE_CLAUDE_CODE".into(), "1".into());
-            values.insert("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT".into(), "1".into());
-            values.insert("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS".into(), "1".into());
-            values.insert("OPENCODE_PURE".into(), "1".into());
-            let registered: Map<String, Value> = unique_models(model, models)
-                .into_iter()
-                .map(|id| (id.to_owned(), json!({"name": id})))
-                .collect();
-            let mut agents = Map::new();
-            for slot in [
-                "build",
-                "plan",
-                "general",
-                "explore",
-                "compaction",
-                "title",
-                "summary",
-            ] {
-                agents.insert(
-                    slot.into(),
-                    json!({"model": format!("astraflow/{}", model_for_slot(models, slot, model))}),
-                );
-            }
+            let user_content = env::var("OPENCODE_CONFIG_CONTENT").ok();
             values.insert(
                 "OPENCODE_CONFIG_CONTENT".into(),
-                json!({
-                    "plugin": [],
-                    "model": format!("astraflow/{model}"),
-                    "small_model": format!("astraflow/{}", model_for_slot(models, "small", model)),
-                    "agent": agents,
-                    "provider": {
-                        "astraflow": {
-                            "name": "AstraFlow ModelVerse",
-                            "npm": "@ai-sdk/openai-compatible",
-                            "env": ["ASTRAFLOW_MODELVERSE_API_KEY"],
-                            "options": {
-                                "baseURL": openai_base,
-                                "apiKey": "{env:ASTRAFLOW_MODELVERSE_API_KEY}"
-                            },
-                            "models": registered
-                        }
-                    }
-                })
-                .to_string(),
+                opencode_config_content(&openai_base, model, models, user_content.as_deref())
+                    .to_string(),
             );
         }
         Harness::Hermes => {
-            values.insert("OPENAI_API_KEY".into(), key);
             values.insert("HERMES_INFERENCE_MODEL".into(), model.to_owned());
             values.insert("HERMES_INFERENCE_PROVIDER".into(), "astraflow".into());
-            values.insert("HERMES_SAFE_MODE".into(), "1".into());
-            values.insert("HERMES_ENABLE_PROJECT_PLUGINS".into(), "0".into());
         }
         Harness::Dsh => {}
         Harness::Grok => {
@@ -402,9 +368,107 @@ pub fn environment_with_models(
         values,
         removed: SCRUBBED_ENV
             .iter()
-            .filter(|name| !(harness == Harness::Dsh && **name == "DSH_HOME"))
+            .filter(|name| !preserve_user_environment(harness, name))
             .map(|name| (*name).to_owned())
             .collect(),
+    }
+}
+
+fn opencode_config_content(
+    openai_base: &str,
+    model: &str,
+    models: &BTreeMap<String, String>,
+    user_content: Option<&str>,
+) -> Value {
+    let mut content = user_content
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let root = content.as_object_mut().expect("content is an object");
+    root.insert("model".into(), json!(format!("astraflow-managed/{model}")));
+    root.insert(
+        "small_model".into(),
+        json!(format!(
+            "astraflow-managed/{}",
+            model_for_slot(models, "small", model)
+        )),
+    );
+
+    let agents = root.entry("agent").or_insert_with(|| json!({}));
+    if !agents.is_object() {
+        *agents = json!({});
+    }
+    let agents = agents.as_object_mut().expect("agents is an object");
+    for slot in [
+        "build",
+        "plan",
+        "general",
+        "explore",
+        "compaction",
+        "title",
+        "summary",
+    ] {
+        let agent = agents.entry(slot).or_insert_with(|| json!({}));
+        if !agent.is_object() {
+            *agent = json!({});
+        }
+        agent.as_object_mut().expect("agent is an object").insert(
+            "model".into(),
+            json!(format!(
+                "astraflow-managed/{}",
+                model_for_slot(models, slot, model)
+            )),
+        );
+    }
+
+    let providers = root.entry("provider").or_insert_with(|| json!({}));
+    if !providers.is_object() {
+        *providers = json!({});
+    }
+    let registered: Map<String, Value> = unique_models(model, models)
+        .into_iter()
+        .map(|id| (id.to_owned(), json!({"name": id})))
+        .collect();
+    providers
+        .as_object_mut()
+        .expect("providers is an object")
+        .insert(
+            "astraflow-managed".into(),
+            json!({
+                "name": "AstraFlow ModelVerse",
+                "npm": "@ai-sdk/openai-compatible",
+                "env": ["ASTRAFLOW_MODELVERSE_API_KEY"],
+                "options": {
+                    "baseURL": openai_base,
+                    "apiKey": "{env:ASTRAFLOW_MODELVERSE_API_KEY}"
+                },
+                "models": registered
+            }),
+        );
+    content
+}
+
+fn preserve_user_environment(harness: Harness, name: &str) -> bool {
+    match harness {
+        Harness::Codex => matches!(name, "CODEX_HOME" | "CODEX_CONFIG"),
+        Harness::Grok => name == "GROK_HOME",
+        Harness::Opencode => name.starts_with("OPENCODE_") && name != "OPENCODE_CONFIG_CONTENT",
+        Harness::Hermes => matches!(
+            name,
+            "HERMES_HOME"
+                | "HERMES_SAFE_MODE"
+                | "HERMES_MANAGED_DIR"
+                | "HERMES_ENABLE_PROJECT_PLUGINS"
+        ),
+        Harness::Pi => matches!(name, "PI_CODING_AGENT_DIR" | "PI_CODING_AGENT_SESSION_DIR"),
+        Harness::PrimeAgent => matches!(
+            name,
+            "PRIME_AGENT_CODING_AGENT_DIR"
+                | "PRIME_AGENT_CODING_AGENT_SESSION_DIR"
+                | "PRIME_AGENT_SESSION_DIR"
+        ),
+        Harness::Dsh => name == "DSH_HOME",
+        Harness::Claude => false,
     }
 }
 
@@ -599,15 +663,9 @@ fn validate_passthrough_args(harness: Harness, args: &[String]) -> Result<()> {
         Harness::Opencode => ["-m", "--model"].as_slice(),
         Harness::Hermes => ["--profile", "-p", "--provider", "--model", "-m"].as_slice(),
         Harness::Dsh => ["--patch", "--dump-config", "--dump-default-config"].as_slice(),
-        Harness::Pi | Harness::PrimeAgent => [
-            "--provider",
-            "--model",
-            "--models",
-            "--api-key",
-            "-e",
-            "--extension",
-        ]
-        .as_slice(),
+        Harness::Pi | Harness::PrimeAgent => {
+            ["--provider", "--model", "--models", "--api-key"].as_slice()
+        }
     };
     for arg in args {
         let exact = conflicts.contains(&arg.as_str());
@@ -615,9 +673,6 @@ fn validate_passthrough_args(harness: Harness, args: &[String]) -> Result<()> {
             .iter()
             .filter(|flag| flag.starts_with("--"))
             .any(|flag| arg.starts_with(&format!("{flag}=")));
-        let attached_short_extension = matches!(harness, Harness::Pi | Harness::PrimeAgent)
-            && arg.starts_with("-e")
-            && arg != "-e";
         let attached_codex_short = harness == Harness::Codex
             && ["-c", "-m"]
                 .iter()
@@ -631,14 +686,13 @@ fn validate_passthrough_args(harness: Harness, args: &[String]) -> Result<()> {
             harness == Harness::Opencode && arg.starts_with("-m") && arg != "-m";
         if exact
             || assigned
-            || attached_short_extension
             || attached_codex_short
             || attached_hermes_short
             || attached_grok_short
             || attached_opencode_short
         {
             bail!(
-                "{} argument `{arg}` conflicts with AstraFlow routing; use the outer `astraflow {} --model ...` option and remove inner provider, model, key, config, or extension overrides",
+                "{} argument `{arg}` conflicts with AstraFlow routing; use the outer `astraflow {} --model ...` option and remove inner provider, model, key, or routing-config overrides",
                 harness.name(),
                 harness.name()
             );
@@ -658,73 +712,16 @@ fn prepare_configuration(
 ) -> Result<()> {
     match harness {
         Harness::Codex => {
-            let base = BaseDirs::new()
-                .map(|dirs| dirs.cache_dir().join("astraflow").join("runtime"))
-                .ok_or_else(|| anyhow!("unable to locate cache directory for Codex isolation"))?;
-            fs::create_dir_all(&base).context("create AstraFlow runtime cache")?;
-            let dir = tempfile::Builder::new()
-                .prefix("codex-home-")
-                .tempdir_in(base)
-                .context("create temporary Codex home")?;
-            overlay.values.insert(
-                "CODEX_HOME".into(),
-                dir.path().to_string_lossy().into_owned(),
-            );
             if let Some(catalog) = codex_catalog(&unique_models(model, &models.slots))? {
                 artifacts.push(catalog);
             }
-            artifact_dirs.push(dir);
         }
         Harness::Grok => {
-            let dir = tempfile::tempdir().context("create temporary Grok home")?;
-            configure_grok(endpoint, model, &models.slots, Some(dir.path()))?;
-            overlay.values.insert(
-                "GROK_HOME".into(),
-                dir.path().to_string_lossy().into_owned(),
-            );
-            artifact_dirs.push(dir);
+            configure_grok(endpoint, model, &models.slots, None)?;
         }
         Harness::Pi | Harness::PrimeAgent => {
             let prime = harness == Harness::PrimeAgent;
-            let session_envs: &[&str] = if prime {
-                &[
-                    "PRIME_AGENT_SESSION_DIR",
-                    "PRIME_AGENT_CODING_AGENT_SESSION_DIR",
-                ]
-            } else {
-                &["PI_CODING_AGENT_SESSION_DIR"]
-            };
-            let agent_env = if prime {
-                "PRIME_AGENT_CODING_AGENT_DIR"
-            } else {
-                "PI_CODING_AGENT_DIR"
-            };
-            let default_agent_dir = if prime { ".prime/agent" } else { ".pi/agent" };
-            let session_dir = session_envs
-                .iter()
-                .find_map(|name| env::var_os(name).map(PathBuf::from))
-                .or_else(|| {
-                    env::var_os(agent_env)
-                        .map(PathBuf::from)
-                        .or_else(|| {
-                            BaseDirs::new().map(|dirs| dirs.home_dir().join(default_agent_dir))
-                        })
-                        .map(|dir| dir.join("sessions"))
-                });
-            let dir = tempfile::tempdir().context("create temporary Pi-compatible agent home")?;
-            configure_pi_like(prime, endpoint, model, &models.cycle, Some(dir.path()))?;
-            overlay
-                .values
-                .insert(agent_env.into(), dir.path().to_string_lossy().into_owned());
-            if let Some(session_dir) = session_dir {
-                for session_env in session_envs {
-                    overlay.values.insert(
-                        (*session_env).into(),
-                        session_dir.to_string_lossy().into_owned(),
-                    );
-                }
-            }
-            artifact_dirs.push(dir);
+            configure_pi_like(prime, endpoint, model, &models.cycle, None)?;
         }
         Harness::Dsh => {
             let settings_dir = crate::config::global_dir()?.join("dsh");
@@ -737,46 +734,114 @@ fn prepare_configuration(
                 &settings_dir.join("settings.yaml"),
             )?);
         }
+        Harness::Claude => {
+            artifacts.push(claude_settings_overlay(overlay)?);
+        }
         Harness::Hermes => {
-            let dir = tempfile::tempdir().context("create temporary Hermes home")?;
-            let profile_dir = dir.path().join("profiles").join("astraflow");
-            let managed_dir = dir.path().join("managed");
-            fs::create_dir_all(&profile_dir).context("create isolated Hermes profile")?;
-            fs::create_dir_all(&managed_dir).context("create isolated Hermes managed scope")?;
-            let config = json!({
-                "_config_version": 12,
-                "model": {
-                    "default": model,
-                    "provider": "astraflow"
-                },
-                "providers": {
-                    "astraflow": {
+            let dir = tempfile::tempdir().context("create temporary Hermes managed overlay")?;
+            if let Some(source) = env::var_os("HERMES_MANAGED_DIR").map(PathBuf::from)
+                && source.is_dir()
+            {
+                copy_directory_contents(&source, dir.path())
+                    .context("copy existing Hermes managed configuration")?;
+            }
+            let key_env = format!("ASTRAFLOW_HERMES_KEY_{:016X}", rand::random::<u64>());
+            let key = overlay
+                .values
+                .get("ASTRAFLOW_MODELVERSE_API_KEY")
+                .cloned()
+                .ok_or_else(|| anyhow!("AstraFlow key is missing from Hermes environment"))?;
+            overlay.values.insert(key_env.clone(), key);
+            let path = dir.path().join("config.yaml");
+            let mut config: Value = if path.is_file() {
+                serde_yaml::from_slice(&fs::read(&path)?)
+                    .context("parse existing Hermes managed config.yaml")?
+            } else {
+                json!({})
+            };
+            let root = config
+                .as_object_mut()
+                .ok_or_else(|| anyhow!("Hermes managed config.yaml must contain a mapping"))?;
+            root.entry("_config_version").or_insert(json!(12));
+            let model_config = root.entry("model").or_insert_with(|| json!({}));
+            if !model_config.is_object() {
+                *model_config = json!({});
+            }
+            let model_config = model_config.as_object_mut().expect("model is an object");
+            model_config.insert("default".into(), json!(model));
+            model_config.insert("provider".into(), json!("astraflow"));
+            let providers = root.entry("providers").or_insert_with(|| json!({}));
+            if !providers.is_object() {
+                *providers = json!({});
+            }
+            providers
+                .as_object_mut()
+                .expect("providers is an object")
+                .insert(
+                    "astraflow".into(),
+                    json!({
                         "name": "AstraFlow ModelVerse",
                         "base_url": format!("{}/v1", endpoint.trim_end_matches('/')),
-                        "key_env": "ASTRAFLOW_MODELVERSE_API_KEY",
+                        "key_env": key_env,
                         "default_model": model,
                         "transport": "chat_completions"
-                    }
-                }
-            });
-            fs::write(
-                profile_dir.join("config.yaml"),
-                serde_json::to_vec_pretty(&config)?,
-            )
-            .context("write temporary Hermes config")?;
-            overlay.values.insert(
-                "HERMES_HOME".into(),
-                profile_dir.to_string_lossy().into_owned(),
-            );
+                    }),
+                );
+            fs::write(&path, serde_json::to_vec_pretty(&config)?)
+                .context("write temporary Hermes managed routing overlay")?;
             overlay.values.insert(
                 "HERMES_MANAGED_DIR".into(),
-                managed_dir.to_string_lossy().into_owned(),
+                dir.path().to_string_lossy().into_owned(),
             );
             artifact_dirs.push(dir);
         }
         _ => {}
     }
     Ok(())
+}
+
+fn copy_directory_contents(source: &Path, destination: &Path) -> Result<()> {
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            fs::create_dir_all(&destination_path)?;
+            copy_directory_contents(&source_path, &destination_path)?;
+        } else {
+            fs::copy(&source_path, &destination_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn claude_settings_overlay(overlay: &Environment) -> Result<NamedTempFile> {
+    let env: Map<String, Value> = overlay
+        .values
+        .iter()
+        .filter(|(name, _)| {
+            name.starts_with("ANTHROPIC_")
+                || name.starts_with("CLAUDE_CODE_")
+                || name.as_str() == "ASTRAFLOW_MODELVERSE_API_KEY"
+        })
+        .map(|(name, value)| (name.clone(), Value::String(value.clone())))
+        .collect();
+    let model = overlay
+        .values
+        .get("ANTHROPIC_MODEL")
+        .cloned()
+        .ok_or_else(|| anyhow!("Claude model is missing from AstraFlow environment"))?;
+    let mut file = NamedTempFile::new().context("create temporary Claude routing settings")?;
+    use std::io::Write;
+    file.write_all(&serde_json::to_vec_pretty(&json!({
+        "env": env,
+        "model": model,
+        "advisorModel": model,
+        "teammateDefaultModel": model,
+        "fallbackModel": [model]
+    }))?)?;
+    file.flush()?;
+    Ok(file)
 }
 
 pub fn command_arguments(
@@ -811,20 +876,20 @@ pub fn command_arguments_with_models(
                 "-c".into(),
                 format!("model={}", toml_string(model)),
                 "-c".into(),
-                "model_provider=\"modelverse\"".into(),
+                "model_provider=\"astraflow_managed\"".into(),
                 "-c".into(),
-                "model_providers.modelverse.name=\"AstraFlow ModelVerse\"".into(),
+                "model_providers.astraflow_managed.name=\"AstraFlow ModelVerse\"".into(),
                 "-c".into(),
                 format!(
-                    "model_providers.modelverse.base_url={}",
+                    "model_providers.astraflow_managed.base_url={}",
                     toml_string(&base_url)
                 ),
                 "-c".into(),
-                "model_providers.modelverse.env_key=\"ASTRAFLOW_MODELVERSE_API_KEY\"".into(),
+                "model_providers.astraflow_managed.env_key=\"ASTRAFLOW_MODELVERSE_API_KEY\"".into(),
                 "-c".into(),
-                "model_providers.modelverse.wire_api=\"responses\"".into(),
+                "model_providers.astraflow_managed.wire_api=\"responses\"".into(),
                 "-c".into(),
-                "model_providers.modelverse.requires_openai_auth=false".into(),
+                "model_providers.astraflow_managed.requires_openai_auth=false".into(),
             ];
             if let Some(path) = patch_path {
                 args.push("-c".into());
@@ -845,22 +910,18 @@ pub fn command_arguments_with_models(
             }
             args
         }
-        Harness::Claude => vec![
-            "--setting-sources".into(),
-            String::new(),
-            "--model".into(),
-            model.into(),
-        ],
-        Harness::Grok => vec![
-            "--disable-web-search".into(),
-            "--model".into(),
-            "astraflow".into(),
-        ],
-        Harness::Opencode => vec![
-            "--pure".into(),
-            "--model".into(),
-            format!("astraflow/{model}"),
-        ],
+        Harness::Claude => {
+            let mut configured = vec!["--setting-sources".into(), "user,project,local".into()];
+            if let Some(path) = patch_path {
+                configured.push("--settings".into());
+                configured.push(path.display().to_string());
+            }
+            configured.push("--model".into());
+            configured.push(model.into());
+            configured
+        }
+        Harness::Grok => vec!["--model".into(), "astraflow".into()],
+        Harness::Opencode => Vec::new(),
         Harness::Hermes => vec![
             "--model".into(),
             model.into(),
@@ -869,16 +930,15 @@ pub fn command_arguments_with_models(
         ],
         Harness::Pi | Harness::PrimeAgent => {
             let mut configured = vec![
-                "--no-extensions".into(),
                 "--provider".into(),
-                "astraflow".into(),
+                "astraflow-managed".into(),
                 "--model".into(),
                 model.into(),
             ];
             if !models.cycle.is_empty() {
-                let mut cycle = vec![format!("astraflow/{model}")];
+                let mut cycle = vec![format!("astraflow-managed/{model}")];
                 for item in &models.cycle {
-                    let qualified = format!("astraflow/{item}");
+                    let qualified = format!("astraflow-managed/{item}");
                     if !cycle
                         .iter()
                         .any(|value| value.eq_ignore_ascii_case(&qualified))
@@ -1054,7 +1114,7 @@ fn configure_pi_like(
         })
         .collect();
     providers.insert(
-        "astraflow".into(),
+        "astraflow-managed".into(),
         json!({
             "baseUrl": format!("{}/v1", endpoint.trim_end_matches('/')),
             "api": "openai-completions",
@@ -1099,9 +1159,9 @@ fn codex_catalog(models: &[&str]) -> Result<Option<NamedTempFile>> {
             "priority": 1,
             "availability_nux": null,
             "upgrade": null,
-            "include_skills_usage_instructions": false,
-            "include_plugin_usage_instructions": false,
-            "include_apps_usage_instructions": false,
+            "include_skills_usage_instructions": true,
+            "include_plugin_usage_instructions": true,
+            "include_apps_usage_instructions": true,
             "supports_reasoning_summary_parameter": false,
             "default_reasoning_summary": "none",
             "support_verbosity": false,
@@ -1238,7 +1298,7 @@ mod tests {
         );
         assert!(
             args.iter()
-                .any(|arg| arg == "model_provider=\"modelverse\"")
+                .any(|arg| arg == "model_provider=\"astraflow_managed\"")
         );
     }
 
@@ -1258,8 +1318,21 @@ mod tests {
         );
         assert_eq!(
             &args[..4],
-            ["--setting-sources", "", "--model", "claude-model"]
+            [
+                "--setting-sources",
+                "user,project,local",
+                "--model",
+                "claude-model"
+            ]
         );
+
+        let overlay = claude_settings_overlay(&env).unwrap();
+        let settings: Value = serde_json::from_slice(&fs::read(overlay.path()).unwrap()).unwrap();
+        assert_eq!(settings["env"]["ANTHROPIC_AUTH_TOKEN"], "test-key");
+        assert_eq!(settings["env"]["ANTHROPIC_BASE_URL"], cred.endpoint);
+        assert_eq!(settings["env"]["CLAUDE_CODE_USE_BEDROCK"], "0");
+        assert_eq!(settings["advisorModel"], "claude-model");
+        assert_eq!(settings["fallbackModel"], json!(["claude-model"]));
     }
 
     #[test]
@@ -1312,16 +1385,16 @@ mod tests {
             "chat-model",
         );
         let config: Value = serde_json::from_str(&env.values["OPENCODE_CONFIG_CONTENT"]).unwrap();
-        assert_eq!(config["model"], "astraflow/chat-model");
+        assert_eq!(config["model"], "astraflow-managed/chat-model");
         assert_eq!(
-            config["provider"]["astraflow"]["models"]["chat-model"]["name"],
+            config["provider"]["astraflow-managed"]["models"]["chat-model"]["name"],
             "chat-model"
         );
-        assert_eq!(config["plugin"], json!([]));
-        assert_eq!(env.values["OPENCODE_DISABLE_PROJECT_CONFIG"], "1");
-        assert_eq!(env.values["OPENCODE_DISABLE_DEFAULT_PLUGINS"], "1");
-        assert_eq!(env.values["OPENCODE_DISABLE_EXTERNAL_SKILLS"], "1");
-        assert_eq!(env.values["OPENCODE_PURE"], "1");
+        assert!(config.get("plugin").is_none());
+        assert!(!env.values.contains_key("OPENCODE_DISABLE_PROJECT_CONFIG"));
+        assert!(!env.values.contains_key("OPENCODE_DISABLE_DEFAULT_PLUGINS"));
+        assert!(!env.values.contains_key("OPENCODE_DISABLE_EXTERNAL_SKILLS"));
+        assert!(!env.values.contains_key("OPENCODE_PURE"));
         let args = command_arguments(
             Harness::Opencode,
             &cred.endpoint,
@@ -1329,7 +1402,28 @@ mod tests {
             &["run".into(), "hello".into()],
             None,
         );
-        assert_eq!(&args[..3], ["--pure", "--model", "astraflow/chat-model"]);
+        assert_eq!(&args, &["run", "hello"]);
+
+        let merged = opencode_config_content(
+            "https://api.modelverse.cn/v1",
+            "chat-model",
+            &BTreeMap::new(),
+            Some(
+                r#"{"plugin":["user-plugin"],"theme":"user-theme","agent":{"build":{"tools":{"bash":false},"model":"hostile/model"}},"provider":{"user-provider":{"name":"User"},"astraflow":{"options":{"baseURL":"http://127.0.0.1:9/v1"}}}}"#,
+            ),
+        );
+        assert_eq!(merged["plugin"], json!(["user-plugin"]));
+        assert_eq!(merged["theme"], "user-theme");
+        assert_eq!(merged["agent"]["build"]["tools"]["bash"], false);
+        assert_eq!(
+            merged["agent"]["build"]["model"],
+            "astraflow-managed/chat-model"
+        );
+        assert_eq!(merged["provider"]["user-provider"]["name"], "User");
+        assert_eq!(
+            merged["provider"]["astraflow-managed"]["options"]["baseURL"],
+            "https://api.modelverse.cn/v1"
+        );
     }
 
     #[test]
@@ -1353,13 +1447,16 @@ mod tests {
             &models,
         );
         let config: Value = serde_json::from_str(&env.values["OPENCODE_CONFIG_CONTENT"]).unwrap();
-        assert_eq!(config["small_model"], "astraflow/small-slot");
+        assert_eq!(config["small_model"], "astraflow-managed/small-slot");
         assert_eq!(
             config["agent"]["compaction"]["model"],
-            "astraflow/compact-slot"
+            "astraflow-managed/compact-slot"
         );
         for id in ["main-slot", "small-slot", "build-slot", "summary-slot"] {
-            assert_eq!(config["provider"]["astraflow"]["models"][id]["name"], id);
+            assert_eq!(
+                config["provider"]["astraflow-managed"]["models"][id]["name"],
+                id
+            );
         }
     }
 
@@ -1374,6 +1471,11 @@ mod tests {
     #[test]
     fn pi_cycle_pool_is_registered_and_passed_to_the_real_cli_contract() {
         let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("models.json"),
+            br#"{"theme":"user-theme","providers":{"user-provider":{"models":[]}}}"#,
+        )
+        .unwrap();
         configure_pi_like(
             false,
             "https://api.modelverse.cn",
@@ -1385,12 +1487,14 @@ mod tests {
         let config: Value =
             serde_json::from_slice(&fs::read(dir.path().join("models.json")).unwrap()).unwrap();
         assert_eq!(
-            config["providers"]["astraflow"]["models"]
+            config["providers"]["astraflow-managed"]["models"]
                 .as_array()
                 .unwrap()
                 .len(),
             3
         );
+        assert_eq!(config["theme"], "user-theme");
+        assert!(config["providers"]["user-provider"].is_object());
         let models = HarnessModelSettings {
             slots: BTreeMap::from([("default".into(), "main-slot".into())]),
             cycle: vec!["cycle-a".into(), "cycle-b".into()],
@@ -1406,9 +1510,67 @@ mod tests {
         assert!(args.windows(2).any(|pair| {
             pair == [
                 "--models",
-                "astraflow/main-slot,astraflow/cycle-a,astraflow/cycle-b",
+                "astraflow-managed/main-slot,astraflow-managed/cycle-a,astraflow-managed/cycle-b",
             ]
         }));
+    }
+
+    #[test]
+    fn user_customization_homes_are_preserved_while_route_values_are_managed() {
+        let cred = credential();
+        for (harness, home) in [
+            (Harness::Codex, "CODEX_HOME"),
+            (Harness::Grok, "GROK_HOME"),
+            (Harness::Opencode, "OPENCODE_CONFIG_DIR"),
+            (Harness::Hermes, "HERMES_HOME"),
+            (Harness::Pi, "PI_CODING_AGENT_DIR"),
+            (Harness::PrimeAgent, "PRIME_AGENT_CODING_AGENT_DIR"),
+            (Harness::Dsh, "DSH_HOME"),
+        ] {
+            let env = environment(harness, &cred.api_key, &cred.endpoint, "chat-model");
+            assert!(!env.removed.iter().any(|name| name == home), "{harness:?}");
+        }
+
+        let mut hermes = environment(Harness::Hermes, &cred.api_key, &cred.endpoint, "chat-model");
+        assert_eq!(hermes.values["HERMES_INFERENCE_PROVIDER"], "astraflow");
+        assert!(!hermes.values.contains_key("HERMES_SAFE_MODE"));
+        let mut artifacts = Vec::new();
+        let mut artifact_dirs = Vec::new();
+        prepare_configuration(
+            Harness::Hermes,
+            &cred.endpoint,
+            "chat-model",
+            &HarnessModelSettings::default(),
+            &mut hermes,
+            &mut artifacts,
+            &mut artifact_dirs,
+        )
+        .unwrap();
+        let managed_dir = Path::new(&hermes.values["HERMES_MANAGED_DIR"]);
+        let managed: Value =
+            serde_json::from_slice(&fs::read(managed_dir.join("config.yaml")).unwrap()).unwrap();
+        let key_env = managed["providers"]["astraflow"]["key_env"]
+            .as_str()
+            .unwrap();
+        assert!(key_env.starts_with("ASTRAFLOW_HERMES_KEY_"));
+        assert_eq!(hermes.values[key_env], "test-key");
+        assert_eq!(
+            managed["providers"]["astraflow"]["base_url"],
+            "https://api.modelverse.cn/v1"
+        );
+
+        let opencode = environment(
+            Harness::Opencode,
+            &cred.api_key,
+            &cred.endpoint,
+            "chat-model",
+        );
+        assert!(
+            !opencode
+                .removed
+                .iter()
+                .any(|name| name == "OPENCODE_DISABLE_EXTERNAL_SKILLS")
+        );
     }
 
     #[test]
@@ -1456,8 +1618,8 @@ mod tests {
             .is_err()
         );
         assert!(
-            validate_passthrough_args(Harness::Pi, &["--extension".into(), "hostile.ts".into()])
-                .is_err()
+            validate_passthrough_args(Harness::Pi, &["--extension".into(), "trusted.ts".into()])
+                .is_ok()
         );
         assert!(
             validate_passthrough_args(Harness::Pi, &["--print".into(), "hello".into()]).is_ok()
@@ -1472,6 +1634,14 @@ mod tests {
         assert_eq!(value["models"][0]["slug"], "future-responses-model");
         assert_eq!(value["models"][0]["input_modalities"], json!(["text"]));
         assert_eq!(value["models"][0]["use_responses_lite"], false);
+        assert_eq!(
+            value["models"][0]["include_skills_usage_instructions"],
+            true
+        );
+        assert_eq!(
+            value["models"][0]["include_plugin_usage_instructions"],
+            true
+        );
     }
 
     #[test]
@@ -1479,7 +1649,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(
             dir.path().join("config.toml"),
-            "[model.astraflow]\napi_key='hostile'\n[model.astraflow.extra_headers]\nAuthorization='Bearer hostile'\n",
+            "theme='user-theme'\n[model.user]\nmodel='user-model'\n[model.astraflow]\napi_key='hostile'\n[model.astraflow.extra_headers]\nAuthorization='Bearer hostile'\n",
         )
         .unwrap();
         configure_grok(
@@ -1497,6 +1667,11 @@ mod tests {
         assert_eq!(provider["model"].as_str(), Some("chat-model"));
         assert!(provider.get("api_key").is_none());
         assert!(provider.get("extra_headers").is_none());
+        assert_eq!(document["theme"].as_str(), Some("user-theme"));
+        assert_eq!(
+            document["model"]["user"]["model"].as_str(),
+            Some("user-model")
+        );
 
         let env = environment(
             Harness::Grok,
