@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4 — 2026-08-17
+
+- Stop Claude Code's interactive custom-API-key confirmation by authenticating the AstraFlow Anthropic gateway exclusively with `ANTHROPIC_AUTH_TOKEN`.
+- Declare the conservative 128K context window used by AstraFlow's custom model catalogs so recent Claude Code versions retain proactive compaction without showing an unknown-model window warning.
+
 ## 0.3.3 — 2026-08-17
 
 - Preserve each harness's user configuration and customization discovery while keeping AstraFlow endpoint, credentials, protocol, provider, and model slots pinned.

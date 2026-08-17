@@ -34,6 +34,7 @@ const SCRUBBED_ENV: &[&str] = &[
     "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
@@ -292,10 +293,14 @@ pub fn environment_with_models(
             values.insert("NO_BROWSER".into(), "1".into());
         }
         Harness::Claude => {
-            values.insert("ANTHROPIC_API_KEY".into(), key.clone());
             values.insert("ANTHROPIC_AUTH_TOKEN".into(), key);
             values.insert("ANTHROPIC_BASE_URL".into(), root.to_owned());
             values.insert("ANTHROPIC_MODEL".into(), model.to_owned());
+            // ModelVerse currently exposes conversational model IDs without context-window
+            // metadata. Keep Claude Code's proactive compaction aligned with the conservative
+            // window used by the other AstraFlow harness catalogs instead of letting Claude
+            // assume 200K for an unknown gateway model.
+            values.insert("CLAUDE_CODE_MAX_CONTEXT_TOKENS".into(), "128000".into());
             for (name, slot) in [
                 ("ANTHROPIC_DEFAULT_FABLE_MODEL", "fable"),
                 ("ANTHROPIC_DEFAULT_OPUS_MODEL", "opus"),
@@ -1328,8 +1333,10 @@ mod tests {
 
         let overlay = claude_settings_overlay(&env).unwrap();
         let settings: Value = serde_json::from_slice(&fs::read(overlay.path()).unwrap()).unwrap();
+        assert!(settings["env"].get("ANTHROPIC_API_KEY").is_none());
         assert_eq!(settings["env"]["ANTHROPIC_AUTH_TOKEN"], "test-key");
         assert_eq!(settings["env"]["ANTHROPIC_BASE_URL"], cred.endpoint);
+        assert_eq!(settings["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "128000");
         assert_eq!(settings["env"]["CLAUDE_CODE_USE_BEDROCK"], "0");
         assert_eq!(settings["advisorModel"], "claude-model");
         assert_eq!(settings["fallbackModel"], json!(["claude-model"]));

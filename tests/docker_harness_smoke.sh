@@ -147,6 +147,8 @@ expected_path = {
 for record in completions:
     assert record["path"].split("?", 1)[0].rstrip("/") == expected_path, (name, record)
     assert record.get("authorization") == "Bearer offline-sentinel-key", (name, record)
+    if name == "claude":
+        assert record.get("x_api_key") is None, (name, record)
 print(f"{name}: route/model/auth override verified ({len(records)} request(s))")
 PY
   then
