@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.5 — 2026-08-17
+
+- Replace remote-script self-updates with versioned raw release binaries, bounded downloads,
+  SHA-256 verification, executable version validation, and atomic replacement.
+- Verify pinned third-party Docker installers before execution and run all deliverable container
+  targets as an unprivileged `astraflow` user with a runtime health check.
+- Pin GitHub Actions to immutable commit SHAs, restrict release write permission to the publish job,
+  and let Dependabot maintain Actions and Cargo dependencies.
+- Generate invalid test credentials at runtime and document the narrowly scoped SHA-1 compatibility
+  boundary mandated by the UCloud OpenAPI V1 signing protocol.
+
 ## 0.3.4 — 2026-08-17
 
 - Stop Claude Code's interactive custom-API-key confirmation by authenticating the AstraFlow Anthropic gateway exclusively with `ANTHROPIC_AUTH_TOKEN`.

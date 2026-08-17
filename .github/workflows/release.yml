@@ -5,19 +5,19 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   linux-x64:
     name: Linux x64 (Debian 12)
     runs-on: [self-hosted, linux, x64, rust, astraflow-cli]
-    container: rust:1.88-bookworm
+    container: rust:1.88-bookworm@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0
     timeout-minutes: 30
     env:
       TARGET: x86_64-unknown-linux-gnu
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build
         run: |
           workspace_uid=$(stat -c %u "$GITHUB_WORKSPACE")
@@ -26,23 +26,26 @@ jobs:
           rustup target add "$TARGET"
           cargo build --release --locked --target "$TARGET"
           "target/${TARGET}/release/astraflow" --json version
+          cp "target/${TARGET}/release/astraflow" "astraflow-${TARGET}"
           tar -czf "astraflow-${TARGET}.tar.gz" -C "target/${TARGET}/release" astraflow
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: astraflow-linux-x64
-          path: astraflow-${{ env.TARGET }}.tar.gz
+          path: |
+            astraflow-${{ env.TARGET }}
+            astraflow-${{ env.TARGET }}.tar.gz
           if-no-files-found: error
 
   linux-arm64:
     name: Linux arm64 (Debian 12)
     runs-on: ubuntu-24.04-arm
-    container: rust:1.88-bookworm
+    container: rust:1.88-bookworm@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0
     timeout-minutes: 30
     env:
       TARGET: aarch64-unknown-linux-gnu
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build
         run: |
           workspace_uid=$(stat -c %u "$GITHUB_WORKSPACE")
@@ -51,11 +54,14 @@ jobs:
           rustup target add "$TARGET"
           cargo build --release --locked --target "$TARGET"
           "target/${TARGET}/release/astraflow" --json version
+          cp "target/${TARGET}/release/astraflow" "astraflow-${TARGET}"
           tar -czf "astraflow-${TARGET}.tar.gz" -C "target/${TARGET}/release" astraflow
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: astraflow-linux-arm64
-          path: astraflow-${{ env.TARGET }}.tar.gz
+          path: |
+            astraflow-${{ env.TARGET }}
+            astraflow-${{ env.TARGET }}.tar.gz
           if-no-files-found: error
 
   macos:
@@ -75,17 +81,21 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build
         run: |
           rustup toolchain install 1.88.0 --profile minimal
           rustup target add "${{ matrix.target }}" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "${{ matrix.target }}"
+          "target/${{ matrix.target }}/release/astraflow" --json version
+          cp "target/${{ matrix.target }}/release/astraflow" "astraflow-${{ matrix.target }}"
           tar -czf "astraflow-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" astraflow
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: astraflow-macos-${{ matrix.arch }}
-          path: astraflow-${{ matrix.target }}.tar.gz
+          path: |
+            astraflow-${{ matrix.target }}
+            astraflow-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
   windows:
@@ -105,18 +115,22 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build
         shell: pwsh
         run: |
           rustup toolchain install 1.88.0 --profile minimal
           rustup target add "${{ matrix.target }}" --toolchain 1.88.0
           cargo +1.88.0 build --release --locked --target "${{ matrix.target }}"
+          & "target/${{ matrix.target }}/release/astraflow.exe" --json version
+          Copy-Item "target/${{ matrix.target }}/release/astraflow.exe" "astraflow-${{ matrix.target }}.exe"
           Compress-Archive -Path "target/${{ matrix.target }}/release/astraflow.exe" -DestinationPath "astraflow-${{ matrix.target }}.zip"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: astraflow-windows-${{ matrix.arch }}
-          path: astraflow-${{ matrix.target }}.zip
+          path: |
+            astraflow-${{ matrix.target }}.exe
+            astraflow-${{ matrix.target }}.zip
           if-no-files-found: error
 
   publish:
@@ -124,13 +138,15 @@ jobs:
     needs: [linux-x64, linux-arm64, macos, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Validate tag
         run: |
           version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
           test "v${version}" = "$GITHUB_REF_NAME"
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: dist
           merge-multiple: true

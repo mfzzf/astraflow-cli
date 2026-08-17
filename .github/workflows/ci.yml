@@ -20,7 +20,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Select Rust 1.88
         run: |
           rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
@@ -44,7 +44,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust, astraflow-cli]
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build pinned harness image
         run: docker build --target harness-all -t astraflow-harness-all:ci .
       - name: Verify hostile config cannot win

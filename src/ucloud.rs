@@ -263,7 +263,9 @@ pub fn create_signature(params: &BTreeMap<String, String>, private_key: &str) ->
         canonical.push_str(value);
     }
     canonical.push_str(private_key);
-    format!("{:x}", Sha1::digest(canonical.as_bytes()))
+    // UCloud OpenAPI V1 mandates SHA-1 over sorted parameter pairs plus PrivateKey.
+    // This compatibility boundary cannot use another algorithm until the server protocol changes.
+    format!("{:x}", Sha1::digest(canonical.as_bytes())) // nosemgrep: rust.lang.security.weak-crypto
 }
 
 fn validate_response(status: u16, payload: &Value) -> Result<()> {

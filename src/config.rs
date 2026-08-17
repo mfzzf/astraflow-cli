@@ -674,33 +674,33 @@ fn create_private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn ensure_safe_file(path: &Path) -> Result<()> {
+fn ensure_safe_file(_path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        let metadata = fs::symlink_metadata(path)?;
+        let metadata = fs::symlink_metadata(_path)?;
         if metadata.file_type().is_symlink() {
-            bail!("refusing symlinked credential file: {}", path.display());
+            bail!("refusing symlinked credential file: {}", _path.display());
         }
         if metadata.mode() & 0o077 != 0 {
             bail!(
                 "credential file permissions are too broad: {}; run `astraflow workspace --repair`",
-                path.display()
+                _path.display()
             );
         }
     }
     Ok(())
 }
 
-fn set_private_file_permissions(path: &Path) -> Result<()> {
+fn set_private_file_permissions(_path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let metadata = fs::symlink_metadata(path)?;
+        let metadata = fs::symlink_metadata(_path)?;
         if metadata.file_type().is_symlink() {
-            bail!("refusing symlinked credential file: {}", path.display());
+            bail!("refusing symlinked credential file: {}", _path.display());
         }
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        fs::set_permissions(_path, fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
 }

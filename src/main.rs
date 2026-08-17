@@ -12,7 +12,7 @@ use astraflow::i18n::{BANNER, Messages};
 use astraflow::model_picker::ModelPicker;
 use astraflow::output::OutputMode;
 use astraflow::update_prompt::{self, UpdateChoice};
-use astraflow::{modelverse, oauth, proxy, ucloud};
+use astraflow::{modelverse, oauth, proxy, ucloud, updater};
 use clap::{CommandFactory, Parser, error::ErrorKind};
 use clap_complete::generate;
 use dialoguer::{Confirm, Input, Password, Select, theme::ColorfulTheme};
@@ -21,7 +21,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde_json::{Value, json};
 use std::env;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1464,10 +1464,6 @@ fn changelog(mode: OutputMode, query: Option<&str>) -> Result<i32> {
 }
 
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/mfzzf/astraflow-cli/releases/latest";
-const INSTALL_SH_URL: &str =
-    "https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.sh";
-const INSTALL_PS1_URL: &str =
-    "https://raw.githubusercontent.com/mfzzf/astraflow-cli/main/install.ps1";
 const UPDATE_CHECK_INTERVAL: u64 = 24 * 60 * 60;
 
 async fn maybe_prompt_for_update(command: &Option<CliCommand>, mode: OutputMode) -> Result<bool> {
@@ -1566,48 +1562,10 @@ async fn update(mode: OutputMode, args: astraflow::cli::UpdateArgs) -> Result<i3
 }
 
 async fn install_release(version: &str, mode: OutputMode) -> Result<()> {
-    let script_url = if cfg!(windows) {
-        INSTALL_PS1_URL
-    } else {
-        INSTALL_SH_URL
-    };
-    let script = http_client()?
-        .get(script_url)
-        .send()
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
-    let mut file = tempfile::NamedTempFile::new().context("create temporary installer")?;
-    file.write_all(&script)?;
-    file.flush()?;
-
-    let install_dir = env::current_exe()
-        .context("locate the running astraflow executable")?
-        .parent()
-        .ok_or_else(|| anyhow!("the running astraflow executable has no parent directory"))?
-        .to_owned();
-    let mut command = if cfg!(windows) {
-        let mut command = Command::new("powershell.exe");
-        command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]);
-        command
-    } else {
-        Command::new("sh")
-    };
-    command
-        .arg(file.path())
-        .env("ASTRAFLOW_VERSION", version)
-        .env("ASTRAFLOW_INSTALL_DIR", install_dir)
-        .stdin(Stdio::inherit())
-        .stdout(if mode == OutputMode::Json {
-            Stdio::null()
-        } else {
-            Stdio::inherit()
-        })
-        .stderr(Stdio::inherit());
-    let status = command.status().await.context("run release installer")?;
-    if !status.success() {
-        bail!("release installer exited with status {status}");
+    let executable = env::current_exe().context("locate the running astraflow executable")?;
+    let state = updater::install_release(&http_client()?, version, &executable).await?;
+    if state == updater::InstallState::PendingProcessExit && mode == OutputMode::Human {
+        eprintln!("The verified update will replace the executable after AstraFlow exits.");
     }
     Ok(())
 }
