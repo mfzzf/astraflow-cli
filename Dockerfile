@@ -28,7 +28,7 @@ CMD ["codex", "--version"]
 FROM development AS build
 RUN cargo build --release --locked
 
-FROM node:22-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a AS harness-all
+FROM node:26-bookworm@sha256:0353e48e0e8a993db87b720c242f54b207059d1bcc0106534896e8a11054c837 AS harness-all
 ARG CLAUDE_VERSION=2.1.233
 ARG CODEX_VERSION=0.147.0
 ARG OPENCODE_VERSION=1.18.18
