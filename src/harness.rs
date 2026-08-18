@@ -1,4 +1,5 @@
 use crate::config::{Credential, HarnessModelSettings};
+use crate::model_catalog::max_context_tokens;
 use crate::model_picker::ModelSlot;
 use anyhow::{Context, Result, anyhow, bail};
 use directories::BaseDirs;
@@ -296,11 +297,10 @@ pub fn environment_with_models(
             values.insert("ANTHROPIC_AUTH_TOKEN".into(), key);
             values.insert("ANTHROPIC_BASE_URL".into(), root.to_owned());
             values.insert("ANTHROPIC_MODEL".into(), model.to_owned());
-            // ModelVerse currently exposes conversational model IDs without context-window
-            // metadata. Keep Claude Code's proactive compaction aligned with the conservative
-            // window used by the other AstraFlow harness catalogs instead of letting Claude
-            // assume 200K for an unknown gateway model.
-            values.insert("CLAUDE_CODE_MAX_CONTEXT_TOKENS".into(), "128000".into());
+            values.insert(
+                "CLAUDE_CODE_MAX_CONTEXT_TOKENS".into(),
+                max_context_tokens(model).to_string(),
+            );
             for (name, slot) in [
                 ("ANTHROPIC_DEFAULT_FABLE_MODEL", "fable"),
                 ("ANTHROPIC_DEFAULT_OPUS_MODEL", "opus"),
@@ -1113,7 +1113,7 @@ fn configure_pi_like(
                 "id": id,
                 "name": id,
                 "input": ["text"],
-                "contextWindow": 128000,
+                "contextWindow": max_context_tokens(id),
                 "maxTokens": 16384
             })
         })
@@ -1176,8 +1176,8 @@ fn codex_catalog(models: &[&str]) -> Result<Option<NamedTempFile>> {
             "truncation_policy": {"mode": "tokens", "limit": 10000},
             "supports_parallel_tool_calls": false,
             "supports_image_detail_original": false,
-            "context_window": 128000,
-            "max_context_window": 128000,
+            "context_window": max_context_tokens(model),
+            "max_context_window": max_context_tokens(model),
             "experimental_supported_tools": [],
             "input_modalities": ["text"],
             "supports_search_tool": false,
@@ -1336,7 +1336,7 @@ mod tests {
         assert!(settings["env"].get("ANTHROPIC_API_KEY").is_none());
         assert_eq!(settings["env"]["ANTHROPIC_AUTH_TOKEN"], "test-key");
         assert_eq!(settings["env"]["ANTHROPIC_BASE_URL"], cred.endpoint);
-        assert_eq!(settings["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "128000");
+        assert_eq!(settings["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "1000000");
         assert_eq!(settings["env"]["CLAUDE_CODE_USE_BEDROCK"], "0");
         assert_eq!(settings["advisorModel"], "claude-model");
         assert_eq!(settings["fallbackModel"], json!(["claude-model"]));
@@ -1500,6 +1500,10 @@ mod tests {
                 .len(),
             3
         );
+        assert_eq!(
+            config["providers"]["astraflow-managed"]["models"][0]["contextWindow"],
+            1_000_000
+        );
         assert_eq!(config["theme"], "user-theme");
         assert!(config["providers"]["user-provider"].is_object());
         let models = HarnessModelSettings {
@@ -1641,6 +1645,7 @@ mod tests {
         assert_eq!(value["models"][0]["slug"], "future-responses-model");
         assert_eq!(value["models"][0]["input_modalities"], json!(["text"]));
         assert_eq!(value["models"][0]["use_responses_lite"], false);
+        assert_eq!(value["models"][0]["context_window"], 1_000_000);
         assert_eq!(
             value["models"][0]["include_skills_usage_instructions"],
             true
@@ -1649,6 +1654,26 @@ mod tests {
             value["models"][0]["include_plugin_usage_instructions"],
             true
         );
+    }
+
+    #[test]
+    fn claude_uses_known_and_fallback_context_windows() {
+        let cred = credential();
+        let known = environment(
+            Harness::Claude,
+            &cred.api_key,
+            &cred.endpoint,
+            "claude-haiku-4-5-20251001",
+        );
+        assert_eq!(known.values["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "200000");
+
+        let custom = environment(
+            Harness::Claude,
+            &cred.api_key,
+            &cred.endpoint,
+            "future-custom-model",
+        );
+        assert_eq!(custom.values["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "1000000");
     }
 
     #[test]

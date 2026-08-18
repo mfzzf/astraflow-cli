@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.6 — 2026-08-18
+
+- Add a sourced model context-window catalog shared by Claude Code, Codex, Pi, and Prime Agent;
+  known models use their maintained maximum while unknown and custom IDs default to 1M tokens.
+
 ## 0.3.5 — 2026-08-17
 
 - Replace remote-script self-updates with versioned raw release binaries, bounded downloads,
